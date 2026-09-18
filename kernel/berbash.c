@@ -17,6 +17,7 @@ static char input_getchar(void) {
 }
 
 #include "timer.h"
+#include "rtc.h"
 
 extern void term_write(const char *s);
 extern void term_putchar(char c);
@@ -68,6 +69,8 @@ static int builtin_help(int argc, char **argv) {
     term_write("  logoff        shut down / halt\n");
     term_write("  crash         trigger a kernel panic (test)\n");
     term_write("  uptime        show time since boot\n");
+    term_write("  date          show current date\n");
+    term_write("  time          show current time\n");
     return 0;
 }
 
@@ -125,6 +128,40 @@ struct builtin {
     int (*fn)(int argc, char **argv);
 };
 
+static void put_u8_2(uint8_t v) {
+    term_putchar('0' + (v / 10) % 10);
+    term_putchar('0' +  v       % 10);
+}
+
+static void put_u16_4(uint16_t v) {
+    term_putchar('0' + (v / 1000) % 10);
+    term_putchar('0' + (v /  100) % 10);
+    term_putchar('0' + (v /   10) % 10);
+    term_putchar('0' +  v         % 10);
+}
+
+static int builtin_date(int argc, char **argv) {
+    (void)argc; (void)argv;
+    struct rtc_time t;
+    rtc_read(&t);
+    put_u16_4(t.year); term_putchar('-');
+    put_u8_2(t.month); term_putchar('-');
+    put_u8_2(t.day);
+    term_putchar('\n');
+    return 0;
+}
+
+static int builtin_time(int argc, char **argv) {
+    (void)argc; (void)argv;
+    struct rtc_time t;
+    rtc_read(&t);
+    put_u8_2(t.hour); term_putchar(':');
+    put_u8_2(t.min);  term_putchar(':');
+    put_u8_2(t.sec);
+    term_putchar('\n');
+    return 0;
+}
+
 static struct builtin builtins[] = {
     { "echo",   builtin_echo   },
     { "help",   builtin_help   },
@@ -132,6 +169,8 @@ static struct builtin builtins[] = {
     { "logoff", builtin_logoff },
     { "crash",  builtin_crash  },
     { "uptime", builtin_uptime },
+    { "date",   builtin_date   },
+    { "time",   builtin_time   },
     { NULL, NULL },
 };
 
