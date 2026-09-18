@@ -6,6 +6,16 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "serial.h"
+#include "keyboard.h"
+
+static char input_getchar(void) {
+    for (;;) {
+        if (kb_ready())        return kb_getchar();
+        if (serial_rx_ready()) return serial_read_char();
+        __asm__ __volatile__("hlt");
+    }
+}
+
 #include "timer.h"
 
 extern void term_write(const char *s);
@@ -147,7 +157,7 @@ static void print_command_not_found(const char *name) {
 static void line_edit(void) {
     line_len = 0;
     for (;;) {
-        char c = serial_read_char();
+        char c = input_getchar();
 
         if (c == '\r' || c == '\n') {
             term_putchar('\n');

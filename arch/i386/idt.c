@@ -5,6 +5,7 @@
 
 extern void berin_panic(uint16_t code, const char *name, struct regs *r);
 extern void timer_tick(void);
+extern void kb_handler(void);
 
 struct idt_entry {
     uint16_t base_low;
@@ -60,6 +61,7 @@ void isr_handler(struct regs *r) {
     if (r->int_no >= 32 && r->int_no < 48) {
         uint8_t irq = (uint8_t)(r->int_no - 32);
         if (irq == 0) timer_tick();
+        if (irq == 1) kb_handler();
         pic_eoi(irq);
         return;
     }

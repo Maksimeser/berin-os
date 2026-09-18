@@ -1,4 +1,5 @@
 /* BerinOS - kernel */
+#include "keyboard.h"
 #include "pic.h"
 #include "pit.h"
 #include "gdt.h"
@@ -71,7 +72,9 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
             idt_init();
             pic_remap();
             pit_init(100);
+            kb_init();
             pic_unmask(0);
+            pic_unmask(1);
             __asm__ __volatile__("sti");
 
     serial_init();
