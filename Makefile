@@ -1,7 +1,7 @@
 CC      := gcc
 AS      := nasm
 LD      := ld
-INCLUDES := -Idrivers -Ikernel -Iarch/i386
+INCLUDES := -Idrivers -Ikernel -Iarch/i386 -Imm
 
 CFLAGS  := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
            -fno-pic -fno-pie -Wall -Wextra -O2 \
@@ -12,7 +12,7 @@ LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
 BUILD   := build
 KERNEL  := berin.bin
 
-C_SRCS   := kernel/kernel.c kernel/berbash.c kernel/panic.c kernel/timer.c drivers/serial.c drivers/keyboard.c drivers/rtc.c arch/i386/gdt.c arch/i386/idt.c arch/i386/pic.c arch/i386/pit.c
+C_SRCS   := kernel/kernel.c kernel/berbash.c kernel/panic.c kernel/timer.c drivers/serial.c drivers/keyboard.c drivers/rtc.c mm/pmm.c mm/paging.c arch/i386/gdt.c arch/i386/idt.c arch/i386/pic.c arch/i386/pit.c
 ASM_SRCS := boot/boot.asm arch/i386/isr_stubs.asm
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
@@ -35,7 +35,8 @@ $(BUILD)/%.o: %.asm
 	$(AS) $(ASFLAGS) $< -o $@
 
 run: $(KERNEL)
-	qemu-system-i386 -kernel $(KERNEL) -m 128M -serial stdio
+	qemu-system-i386 -kernel $(KERNEL) -m 128M -serial stdio \
+	    -no-reboot -d int -D qemu.log
 
 clean:
 	rm -rf $(BUILD) $(KERNEL)

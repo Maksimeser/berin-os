@@ -2,7 +2,8 @@
  * echo, help, clear, logoff, crash, uptime.
  * Input: serial (COM1). Output: VGA + serial.
  */
-
+#include "paging.h"
+#include "pmm.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "serial.h"
@@ -18,6 +19,7 @@ static char input_getchar(void) {
 
 #include "timer.h"
 #include "rtc.h"
+#include "version.h"
 
 extern void term_write(const char *s);
 extern void term_putchar(char c);
@@ -71,6 +73,10 @@ static int builtin_help(int argc, char **argv) {
     term_write("  uptime        show time since boot\n");
     term_write("  date          show current date\n");
     term_write("  time          show current time\n");
+    term_write("  versi [comp]  show versions (v-/l-/h- flags)\n");
+    term_write("  meminfo       physical memory summary\n");
+    term_write("  memtest       alloc 3 pages, free them, verify\n");
+    term_write("  paging        paging status (CR3, CR2, sanity check)\n");
     return 0;
 }
 
@@ -121,12 +127,190 @@ static int builtin_uptime(int argc, char **argv) {
     return 0;
 }
 
+/* ---------- versi ---------- */
+
+struct version_entry {
+    const char *name;
+    const char *version;
+    const char *note;
+};
+
+static const struct version_entry versions[] = {
+    { "kernel",   BERIN_VERSION, "i386, protected mode" },
+    { "berbash",  "0.1",         "shell" },
+    { "serial",   "0.1",         "COM1 115200 8N1" },
+    { "keyboard", "0.1",         "PS/2 scancode set 1" },
+    { "rtc",      "0.1",         "CMOS 0x70/0x71" },
+    { "panic",    "0.1",         "(1panic1)-NNN_name" },
+    { "gdt",      "0.1",         "flat model" },
+    { "idt",      "0.1",         "256 vectors" },
+    { "pic",      "0.1",         "remap 32/40" },
+    { "pit",      "0.1",         "100 Hz" },
+    { "timer",    "0.1",         "tick counter" },
+    { NULL, NULL, NULL }
+};
+
+static int is_flag_token(const char *s) {
+    const char *p = s;
+    if (!*p) return 0;
+    while (*p) p++;
+    return *(p - 1) == '-';
+}
+
+static int flag_has(const char *flags, char c) {
+    const char *p = flags;
+    while (*p && *p != '-') {
+        if (*p == c) return 1;
+        p++;
+    }
+    return 0;
+}
+
+static int builtin_versi(int argc, char **argv) {
+    int verbose = 0;
+    int list_only = 0;
+    const char *target = NULL;
+
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        if (is_flag_token(a)) {
+            if (flag_has(a, 'v')) verbose = 1;
+            if (flag_has(a, 'l')) list_only = 1;
+            if (flag_has(a, 'h')) {
+                term_write("versi - versioner\n");
+                term_write("usage: versi [component] [flags-]\n");
+                term_write("flags (suffix dash):\n");
+                term_write("  v-   verbose (show notes)\n");
+                term_write("  l-   list component names only\n");
+                term_write("  h-   this help\n");
+                return 0;
+            }
+        } else {
+            target = a;
+        }
+    }
+
+    if (list_only) {
+        for (int i = 0; versions[i].name; i++) {
+            if (i > 0) term_putchar(' ');
+            term_write(versions[i].name);
+        }
+        term_putchar('\n');
+        return 0;
+    }
+
+    if (target) {
+        for (int i = 0; versions[i].name; i++) {
+            if (str_eq(versions[i].name, target)) {
+                term_write(versions[i].name);
+                term_write("  ");
+                term_write(versions[i].version);
+                term_putchar('\n');
+                if (verbose && versions[i].note) {
+                    term_write("  note: ");
+                    term_write(versions[i].note);
+                    term_putchar('\n');
+                }
+                return 0;
+            }
+        }
+        term_set_fg(C_RED);
+        term_write("version_not_found: ");
+        term_write(target);
+        term_putchar('\n');
+        term_set_fg(C_GREEN);
+        return 0;
+    }
+
+    term_write("Berin OS ");
+    term_write(BERIN_VERSION);
+    term_write(" \"" BERIN_CODENAME "\"\n");
+    for (int i = 0; versions[i].name; i++) {
+        term_write("  ");
+        term_write(versions[i].name);
+        int len = 0;
+        const char *p = versions[i].name;
+        while (*p++) len++;
+        for (int k = len; k < 10; k++) term_putchar(' ');
+        term_write(versions[i].version);
+        if (verbose && versions[i].note) {
+            term_write("   ");
+            term_write(versions[i].note);
+        }
+        term_putchar('\n');
+    }
+    term_write("\nvendor: ");
+    term_write(BERIN_VENDOR);
+    term_write("  arch: ");
+    term_write(BERIN_ARCH);
+    term_putchar('\n');
+    return 0;
+}
+
 /* ---------- dispatch table ---------- */
 
 struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
 };
+
+static void put_hex32(uint32_t v) {
+    for (int i = 28; i >= 0; i -= 4)
+        term_putchar("0123456789ABCDEF"[(v >> i) & 0xF]);
+}
+
+static int builtin_meminfo(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint32_t total = pmm_total_pages();
+    uint32_t free_ = pmm_free_pages();
+    uint32_t used  = pmm_used_pages();
+
+    term_write("physical memory (4K pages):\n");
+    term_write("  total: "); put_u32(total); term_write(" pages = "); put_u32(total * 4 / 1024); term_write(" MB\n");
+    term_write("  used:  "); put_u32(used);  term_write(" pages = "); put_u32(used  * 4 / 1024); term_write(" MB\n");
+    term_write("  free:  "); put_u32(free_); term_write(" pages = "); put_u32(free_ * 4 / 1024); term_write(" MB\n");
+    return 0;
+}
+
+static int builtin_paging(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("paging:\n");
+    term_write("  enabled : ");
+    term_write(paging_enabled() ? "yes" : "no");
+    term_putchar('\n');
+    term_write("  CR3     : 0x"); put_hex32(paging_get_cr3()); term_putchar('\n');
+    term_write("  CR2     : 0x"); put_hex32(paging_get_cr2()); term_putchar('\n');
+
+    /* Identity-map sanity: reading address 0x100000 (kernel load) must work. */
+    volatile uint32_t *probe = (volatile uint32_t *)0x100000;
+    uint32_t v = *probe;
+    term_write("  probe[0x100000] = 0x"); put_hex32(v); term_putchar('\n');
+    term_write("  identity map works: ");
+    term_write("OK (no #PF)\n");
+    return 0;
+}
+
+static int builtin_memtest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint32_t before = pmm_free_pages();
+
+    void *a = pmm_alloc_page();
+    void *b = pmm_alloc_page();
+    void *c = pmm_alloc_page();
+
+    term_write("alloc a: 0x"); put_hex32((uint32_t)a); term_putchar('\n');
+    term_write("alloc b: 0x"); put_hex32((uint32_t)b); term_putchar('\n');
+    term_write("alloc c: 0x"); put_hex32((uint32_t)c); term_putchar('\n');
+
+    pmm_free_page(b);
+    pmm_free_page(a);
+    pmm_free_page(c);
+
+    uint32_t after = pmm_free_pages();
+    if (after == before) term_write("free pages restored: OK\n");
+    else                 term_write("free pages MISMATCH\n");
+    return 0;
+}
 
 static void put_u8_2(uint8_t v) {
     term_putchar('0' + (v / 10) % 10);
@@ -171,6 +355,10 @@ static struct builtin builtins[] = {
     { "uptime", builtin_uptime },
     { "date",   builtin_date   },
     { "time",   builtin_time   },
+    { "versi",  builtin_versi  },
+    { "meminfo", builtin_meminfo },
+    { "memtest", builtin_memtest },
+    { "paging", builtin_paging },
     { NULL, NULL },
 };
 

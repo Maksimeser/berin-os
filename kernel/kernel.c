@@ -1,12 +1,16 @@
 /* BerinOS - kernel */
+#include "version.h"
 #include "keyboard.h"
 #include "pic.h"
 #include "pit.h"
 #include "gdt.h"
 #include "idt.h"
+#include "pmm.h"
+#include "paging.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "serial.h"
+
 
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
@@ -79,6 +83,8 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
     (void)mb_info;
         gdt_init();
             idt_init();
+                pmm_init(mb_info);
+                    paging_init();
             pic_remap();
             pit_init(100);
             kb_init();
@@ -100,7 +106,7 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
     term_write(" \\   \x1F   /\n");
     term_write("  \\_____/\n");
     term_write("\n");
-    term_write("Berin v0.0.2\n");
+    term_write("Berin v0.0.1\n");
     term_write("\n");
 
     term_write("\n");
