@@ -40,6 +40,8 @@ static void halt_forever(void) {
 
 void berin_panic(uint16_t code, const char *name, struct regs *r) {
     __asm__ __volatile__("cli");
+    extern void term_clear(void);
+    term_clear();
 
     term_set_fg(C_RED);
     term_write("\n\n");

@@ -1,4 +1,6 @@
 /* BerinOS - kernel */
+#include "pic.h"
+#include "pit.h"
 #include "gdt.h"
 #include "idt.h"
 #include <stdint.h>
@@ -30,7 +32,7 @@ void term_set_fg(uint8_t fg) {
     term_color = vga_entry_color(fg, VGA_BLACK);
 }
 
-static void term_clear(void) {
+void term_clear(void) {
     for (size_t y = 0; y < VGA_HEIGHT; y++)
         for (size_t x = 0; x < VGA_WIDTH; x++)
             VGA_MEMORY[y * VGA_WIDTH + x] = vga_entry(' ', term_color);
@@ -67,22 +69,27 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
     (void)mb_info;
         gdt_init();
             idt_init();
+            pic_remap();
+            pit_init(100);
+            pic_unmask(0);
+            __asm__ __volatile__("sti");
 
     serial_init();
 
     term_color = vga_entry_color(VGA_LIGHT_GREEN, VGA_BLACK);
     term_clear();
 
-    term_write("Berin Kernel loaded!\n");
-    term_write("Hello from the other side.\n");
+    term_write("Berin loaded.\n");
+    term_write("The system is loading...\n");
     term_write("\n");
-    term_write("Berin OS v0.0.1\n");
+    term_write(" /\\     /\\\n");
+    term_write("/  \\___/  \\\n");
+    term_write("(  o   o  )\n");
+    term_write(" \\   \x1F   /\n");
+    term_write("  \\_____/\n");
     term_write("\n");
-
-    if (magic == 0x2BADB002)
-        term_write("multiboot1: OK\n");
-    else
-        term_write("multiboot1: magic mismatch\n");
+    term_write("Berin v0.0.2\n");
+    term_write("\n");
 
     term_write("\n");
 

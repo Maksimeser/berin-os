@@ -1,8 +1,10 @@
 /* Berin OS - i386 IDT + interrupt dispatch */
 
 #include "idt.h"
+#include "pic.h"
 
 extern void berin_panic(uint16_t code, const char *name, struct regs *r);
+extern void timer_tick(void);
 
 struct idt_entry {
     uint16_t base_low;
@@ -20,7 +22,6 @@ struct idt_ptr {
 static struct idt_entry idt[256];
 static struct idt_ptr   idtp;
 
-/* from isr_stubs.asm */
 extern uint32_t isr_stub_table[256];
 
 static void idt_set_gate(int n, uint32_t base, uint16_t sel, uint8_t flags) {
@@ -55,6 +56,15 @@ static void map_int_to_panic(uint32_t int_no, uint16_t *code, const char **name)
 }
 
 void isr_handler(struct regs *r) {
+    /* IRQs remapped to INT 32-47 */
+    if (r->int_no >= 32 && r->int_no < 48) {
+        uint8_t irq = (uint8_t)(r->int_no - 32);
+        if (irq == 0) timer_tick();
+        pic_eoi(irq);
+        return;
+    }
+
+    /* CPU exceptions (0-31) -> panic */
     uint16_t code;
     const char *name;
     map_int_to_panic(r->int_no, &code, &name);
