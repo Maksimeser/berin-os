@@ -12,8 +12,8 @@ LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
 BUILD   := build
 KERNEL  := berin.bin
 
-C_SRCS   := kernel/kernel.c kernel/berbash.c drivers/serial.c arch/i386/gdt.c
-ASM_SRCS := boot/boot.asm
+C_SRCS   := kernel/kernel.c kernel/berbash.c kernel/panic.c drivers/serial.c arch/i386/gdt.c arch/i386/idt.c
+ASM_SRCS := boot/boot.asm arch/i386/isr_stubs.asm
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))

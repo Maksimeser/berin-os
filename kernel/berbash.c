@@ -1,5 +1,5 @@
 /* Berin OS - berbash 0.1
- * Minimal shell: echo, help, clear, logoff.
+ * Minimal shell: echo, help, clear, logoff, crash.
  * Input: serial (COM1). Output: VGA + serial.
  */
 
@@ -14,7 +14,6 @@ extern void term_set_fg(uint8_t fg);
 #define MAX_LINE 256
 #define MAX_ARGS 16
 
-/* VGA color indexes (subset) */
 #define C_GREEN   10
 #define C_YELLOW  14
 #define C_GRAY     7
@@ -41,6 +40,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  help          this message\n");
     term_write("  clear         clear screen\n");
     term_write("  logoff        shut down / halt\n");
+    term_write("  crash         trigger a kernel panic (test)\n");
     return 0;
 }
 
@@ -57,10 +57,20 @@ static inline void outw(uint16_t port, uint16_t val) {
 static int builtin_logoff(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("\n[ INFO ] logoff: halting\n");
-    /* ACPI shutdown - covers Q35 and i440fx QEMU machines */
     outw(0x604,  0x2000);
     outw(0x4004, 0x2000);
-    return 42;   /* signal to shell: exit loop -> kernel halts */
+    return 42;
+}
+
+static int builtin_crash(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("[ WARN ] crash: triggering divide error\n");
+    __asm__ __volatile__(
+        "movl $0, %%eax\n\t"
+        "movl $1, %%ebx\n\t"
+        "divl %%eax\n\t"
+        : : : "eax", "ebx", "edx");
+    return 0;
 }
 
 /* ---------------- dispatch table ---------------- */
@@ -75,6 +85,7 @@ static struct builtin builtins[] = {
     { "help",   builtin_help   },
     { "clear",  builtin_clear  },
     { "logoff", builtin_logoff },
+    { "crash",  builtin_crash  },
     { NULL, NULL },
 };
 
@@ -113,7 +124,7 @@ static void line_edit(void) {
             return;
         }
 
-        if (c == 0x7F || c == '\b') {   /* DEL / BS */
+        if (c == 0x7F || c == '\b') {
             if (line_len > 0) {
                 line_len--;
                 term_putchar('\b');
@@ -123,12 +134,12 @@ static void line_edit(void) {
             continue;
         }
 
-        if ((unsigned char)c < 0x20) continue;   /* other control chars */
+        if ((unsigned char)c < 0x20) continue;
 
-            if (line_len < MAX_LINE - 1) {
-                line_buf[line_len++] = c;
-                term_putchar(c);
-            }
+        if (line_len < MAX_LINE - 1) {
+            line_buf[line_len++] = c;
+            term_putchar(c);
+        }
     }
 }
 
@@ -165,8 +176,8 @@ void berbash_run(void) {
         for (int i = 0; builtins[i].name; i++) {
             if (str_eq(builtins[i].name, cmd)) {
                 int rc = builtins[i].fn(argc, argv);
-                if (rc == 42) return;   /* logoff */
-                    found = 1;
+                if (rc == 42) return;
+                found = 1;
                 break;
             }
         }

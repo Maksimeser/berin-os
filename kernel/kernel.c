@@ -1,5 +1,6 @@
 /* BerinOS - kernel */
 #include "gdt.h"
+#include "idt.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "serial.h"
@@ -65,6 +66,7 @@ extern void berbash_run(void);
 void kernel_main(uint32_t magic, uint32_t mb_info) {
     (void)mb_info;
         gdt_init();
+            idt_init();
 
     serial_init();
 
