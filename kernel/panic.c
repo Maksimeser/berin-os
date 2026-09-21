@@ -7,6 +7,11 @@
 extern void term_write(const char *s);
 extern void term_putchar(char c);
 extern void term_set_fg(uint8_t fg);
+extern void term_set_bg(uint8_t bg);
+extern void term_reset_color(void);
+extern void term_write(const char *s);
+extern void term_putchar(char c);
+extern void term_set_fg(uint8_t fg);
 
 #define C_GREEN  10
 #define C_RED    12
@@ -43,6 +48,7 @@ void berin_panic(uint16_t code, const char *name, struct regs *r) {
     extern void term_clear(void);
     term_clear();
 
+    term_reset_color();
     term_set_fg(C_RED);
     term_write("\n\n");
     term_write("================= BERIN PANIC =================\n\n");

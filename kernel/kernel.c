@@ -32,11 +32,17 @@ static inline uint16_t vga_entry(unsigned char c, uint8_t color) {
 
 static size_t  term_row;
 static size_t  term_col;
-static uint8_t term_color;
+static uint8_t term_fg    = 7;
+static uint8_t term_bg    = 0;
+static uint8_t term_color = 0x07;
 
-void term_set_fg(uint8_t fg) {
-    term_color = vga_entry_color(fg, VGA_BLACK);
+static inline void term_update_color(void) {
+    term_color = (uint8_t)((term_bg << 4) | (term_fg & 0x0F));
 }
+
+void term_set_fg(uint8_t fg) { term_fg = fg & 0x0F; term_update_color(); }
+void term_set_bg(uint8_t bg) { term_bg = bg & 0x0F; term_update_color(); }
+void term_reset_color(void)  { term_fg = 7; term_bg = 0; term_update_color(); }
 
 void term_clear(void) {
     for (size_t y = 0; y < VGA_HEIGHT; y++)
@@ -55,7 +61,8 @@ static void term_scroll(void) {
     term_row = VGA_HEIGHT - 1;
 }
 
-void term_putchar(char c) {
+/* low-level: write ONE character to VGA + serial, no ANSI */
+static void term_emit(char c) {
     if (c == '\n') {
         term_col = 0;
         term_row++;
@@ -72,6 +79,39 @@ void term_putchar(char c) {
 
     if (c == '\n') serial_write_char('\r');
     serial_write_char(c);
+}
+
+/* ---------- ANSI escape parser ---------- */
+static int ansi_state = 0;      /* 0=normal, 1=ESC, 2=CSI */
+static int ansi_param = 0;
+
+static void ansi_sgr(int p) {
+    if (p == 0)                    { term_reset_color(); return; }
+    if (p == 1)                    { return; }   /* bold — ignore for now */
+        if (p >= 30 && p <= 37)        { term_set_fg((uint8_t)(p - 30));     return; }
+        if (p >= 40 && p <= 47)        { term_set_bg((uint8_t)(p - 40));     return; }
+        if (p >= 90 && p <= 97)        { term_set_fg((uint8_t)(p - 90 + 8)); return; }
+        if (p >= 100 && p <= 107)      { term_set_bg((uint8_t)(p - 100 + 8));return; }
+}
+
+void term_putchar(char c) {
+    if (ansi_state == 2) {                            /* in CSI */
+        if (c >= '0' && c <= '9') { ansi_param = ansi_param * 10 + (c - '0'); return; }
+        if (c == ';')             { ansi_param = 0; return; }
+        ansi_state = 0;
+        if (c == 'm')                  ansi_sgr(ansi_param);
+        else if (c == 'J' && ansi_param == 2) term_clear();
+        else if (c == 'H')             { term_row = 0; term_col = 0; }
+        return;
+    }
+    if (ansi_state == 1) {                            /* after ESC */
+        if (c == '[') { ansi_state = 2; ansi_param = 0; return; }
+        ansi_state = 0;
+        return;                                       /* drop stray ESC */
+    }
+    if (c == '\033') { ansi_state = 1; return; }
+
+    term_emit(c);
 }
 
 void term_write(const char *s) {
@@ -97,7 +137,8 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
 
     serial_init();
 
-    term_color = vga_entry_color(VGA_LIGHT_GREEN, VGA_BLACK);
+    term_set_fg(VGA_LIGHT_GREEN);
+    term_set_bg(VGA_BLACK);
     term_clear();
 
     term_write("Berin loaded.\n");

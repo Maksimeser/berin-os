@@ -15,6 +15,11 @@
 #include "paging.h"
 
 extern void term_write(const char *s);
+extern void term_write(const char *s);
+extern void term_putchar(char c);
+extern void term_set_fg(uint8_t fg);
+extern void term_set_bg(uint8_t bg);
+extern void term_reset_color(void);
 extern void term_putchar(char c);
 extern void term_set_fg(uint8_t fg);
 
@@ -100,6 +105,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  pf            trigger a page fault (test)\n");
     term_write("  heap          kernel heap usage\n");
     term_write("  kmtest        kmalloc/kfree round-trip test\n");
+    term_write("  colors        ANSI color demo\n");
     return 0;
 }
 
@@ -262,6 +268,8 @@ static int builtin_versi(int argc, char **argv) {
                 return 0;
             }
         }
+        term_reset_color();
+        term_set_fg(C_RED);
         term_set_fg(C_RED);
         term_write("version_not_found: ");
         term_write(target);
@@ -360,6 +368,29 @@ static int builtin_heap(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_colors(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("foreground colors:\n");
+    term_write("\033[30m 0:black ");
+    term_write("\033[31m 1:red ");
+    term_write("\033[32m 2:green ");
+    term_write("\033[33m 3:yellow ");
+    term_write("\033[34m 4:blue ");
+    term_write("\033[35m 5:magenta ");
+    term_write("\033[36m 6:cyan ");
+    term_write("\033[37m 7:white\n");
+    term_write("\033[90m 8:br-black ");
+    term_write("\033[91m 9:br-red ");
+    term_write("\033[92m 10:br-green ");
+    term_write("\033[93m 11:br-yellow ");
+    term_write("\033[94m 12:br-blue ");
+    term_write("\033[95m 13:br-magenta ");
+    term_write("\033[96m 14:br-cyan ");
+    term_write("\033[97m 15:br-white\n");
+    term_write("\033[0mreset done\n");
+    return 0;
+}
+
 static int builtin_pf(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ WARN ] pf: reading unmapped address 0xDEADBEEF\n");
@@ -420,6 +451,7 @@ static struct builtin builtins[] = {
     { "pf",      builtin_pf      },
     { "heap",    builtin_heap    },
     { "kmtest",  builtin_kmtest  },
+    { "colors",  builtin_colors  },
     { NULL, NULL },
 };
 
