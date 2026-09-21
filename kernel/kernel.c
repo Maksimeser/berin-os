@@ -1,4 +1,5 @@
 /* BerinOS - kernel */
+#include "heap.h"
 #include "version.h"
 #include "keyboard.h"
 #include "pic.h"
@@ -80,11 +81,13 @@ void term_write(const char *s) {
 extern void berbash_run(void);
 
 void kernel_main(uint32_t magic, uint32_t mb_info) {
+    (void)magic;
     (void)mb_info;
         gdt_init();
             idt_init();
                 pmm_init(mb_info);
-                    paging_init();
+                paging_init(mb_info);
+                    heap_init();
             pic_remap();
             pit_init(100);
             kb_init();

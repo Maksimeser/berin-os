@@ -1,7 +1,7 @@
 /* Berin OS - kernel panic
  * Marker format: (1panic1)-NNN_name  (see master doc, section 15)
  */
-
+#include "paging.h"
 #include "panic.h"
 
 extern void term_write(const char *s);
@@ -75,6 +75,11 @@ void berin_panic(uint16_t code, const char *name, struct regs *r) {
     if (r->err_code) {
         term_write("  ERR="); put_hex32(r->err_code);
         term_putchar('\n');
+
+    if (code == 1) {   /* page_fault */
+        term_write("  CR2="); put_hex32(paging_get_cr2());
+        term_write("   (faulting address)\n");
+        }
     }
 
     term_write("\n  [system halted]\n\n");
