@@ -1,4 +1,5 @@
 /* BerinOS - kernel */
+#include "vga_font.h"
 #include "heap.h"
 #include "version.h"
 #include "keyboard.h"
@@ -139,10 +140,14 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
 
     term_set_fg(VGA_LIGHT_GREEN);
     term_set_bg(VGA_BLACK);
+    term_set_fg(VGA_LIGHT_GREEN);
+    term_set_bg(VGA_BLACK);
+    term_clear();
+    /* vga_install_cp866_font(); */   /* Phase 7: возврат сюда с framebuffer */
     term_clear();
 
     term_write("Berin loaded.\n");
-    term_write("The system is loading...\n");
+    term_write("Системка стартует...\n");
     term_write("\n");
     term_write(" /\\     /\\\n");
     term_write("/  \\___/  \\\n");
