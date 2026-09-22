@@ -1,8 +1,5 @@
-/* Berin OS - berbash 0.1
- * echo, help, clear, logoff, crash, uptime, date, time,
- * versi, meminfo, memtest, paging, pf.
- * Input: PS/2 keyboard + serial (COM1). Output: VGA + serial.
- */
+/* Berin OS - berbash 0.1*/
+#include "i18n.h"
 #include "heap.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -105,6 +102,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  pf            trigger a page fault (test)\n");
     term_write("  heap          kernel heap usage\n");
     term_write("  kmtest        kmalloc/kfree round-trip test\n");
+    term_write("  locale        show/set language (en|ru)\n");
     term_write("  colors        ANSI color demo\n");
     return 0;
 }
@@ -435,6 +433,37 @@ struct builtin {
     int (*fn)(int argc, char **argv);
 };
 
+static int builtin_locale(int argc, char **argv) {
+    if (argc == 1) {
+        term_write(msg(MSG_LOCALE_CURRENT));
+        term_putchar(' ');
+        term_write(lang_name(i18n_get()));
+        term_putchar('\n');
+        return 0;
+    }
+    if (argc == 3 && str_eq(argv[1], "set")) {
+        if      (str_eq(argv[2], "ru")) i18n_set(LANG_RU);
+        else if (str_eq(argv[2], "en")) i18n_set(LANG_EN);
+        else {
+            term_set_fg(C_RED);
+            term_write("invalid_argument: ");
+            term_write(argv[2]);
+            term_putchar('\n');
+            term_set_fg(C_GREEN);
+            return 0;
+        }
+        term_write(msg(MSG_INFO));
+        term_putchar(' ');
+        term_write(msg(MSG_LOCALE_SET));
+        term_putchar(' ');
+        term_write(lang_name(i18n_get()));
+        term_putchar('\n');
+        return 0;
+    }
+    term_write("usage: locale | locale set en|ru\n");
+    return 0;
+}
+
 static struct builtin builtins[] = {
     { "echo",    builtin_echo    },
     { "help",    builtin_help    },
@@ -452,6 +481,7 @@ static struct builtin builtins[] = {
     { "heap",    builtin_heap    },
     { "kmtest",  builtin_kmtest  },
     { "colors",  builtin_colors  },
+    { "locale",  builtin_locale  },
     { NULL, NULL },
 };
 
@@ -469,6 +499,12 @@ static void print_command_not_found(const char *name) {
     term_write("command_not_found: ");
     term_write(name);
     term_putchar('\n');
+
+    if (i18n_get() == LANG_RU) {
+        term_write("команда не найдена: ");
+        term_write(name);
+        term_putchar('\n');
+    }
     term_set_fg(C_GREEN);
 }
 
