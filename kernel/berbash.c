@@ -10,6 +10,7 @@
 #include "version.h"
 #include "pmm.h"
 #include "paging.h"
+#include "wait.h"
 
 extern void term_write(const char *s);
 extern void term_write(const char *s);
@@ -103,6 +104,9 @@ static int builtin_help(int argc, char **argv) {
     term_write("  heap          kernel heap usage\n");
     term_write("  kmtest        kmalloc/kfree round-trip test\n");
     term_write("  locale        show/set language (en|ru)\n");
+    term_write("  wtest         wait spinner demo (OK)\n");
+    term_write("  wfail         wait spinner demo (FAIL)\n");
+    term_write("  ptest         progress bar demo\n");
     term_write("  colors        ANSI color demo\n");
     return 0;
 }
@@ -433,6 +437,37 @@ struct builtin {
     int (*fn)(int argc, char **argv);
 };
 
+static void busy_delay(uint32_t loops) {
+    for (volatile uint32_t i = 0; i < loops; i++) __asm__ __volatile__("nop");
+}
+
+static int builtin_wtest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wait_start("searching");
+    for (int i = 0; i < 20; i++) { wait_step(); busy_delay(2000000); }
+    wait_done_ok();
+    return 0;
+}
+
+static int builtin_wfail(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wait_start("looking for files");
+    for (int i = 0; i < 20; i++) { wait_step(); busy_delay(2000000); }
+    wait_done_fail("not_found");
+    return 0;
+}
+
+static int builtin_ptest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    progress_start("downloading", 100);
+    for (uint32_t i = 0; i <= 100; i += 5) {
+        progress_update(i);
+        busy_delay(3000000);
+    }
+    progress_done();
+    return 0;
+}
+
 static int builtin_locale(int argc, char **argv) {
     if (argc == 1) {
         term_write(msg(MSG_LOCALE_CURRENT));
@@ -482,6 +517,9 @@ static struct builtin builtins[] = {
     { "kmtest",  builtin_kmtest  },
     { "colors",  builtin_colors  },
     { "locale",  builtin_locale  },
+    { "wtest",   builtin_wtest   },
+    { "wfail",   builtin_wfail   },
+    { "ptest",   builtin_ptest   },
     { NULL, NULL },
 };
 
