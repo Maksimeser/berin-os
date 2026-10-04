@@ -1,30 +1,53 @@
+/* Berin OS - linker script (x86_64, PVH) */
+
 ENTRY(_start)
+
+PHDRS
+{
+    note   PT_NOTE FLAGS(4);
+    text   PT_LOAD FLAGS(5);
+    rodata PT_LOAD FLAGS(4);
+    data   PT_LOAD FLAGS(6);
+}
 
 SECTIONS
 {
     . = 1M;
 
-    .text BLOCK(4K) : ALIGN(4K)
+    .note.Xen : ALIGN(4)
     {
-        KEEP(*(.multiboot_header))
-        *(.text)
-    }
+        KEEP(*(.note.Xen))
+    } :note :text
 
-    .rodata BLOCK(4K) : ALIGN(4K)
+    .text : ALIGN(4K)
+    {
+        *(.text)
+    } :text
+
+    .rodata : ALIGN(4K)
     {
         *(.rodata)
-    }
+    } :rodata
 
-    .data BLOCK(4K) : ALIGN(4K)
+    .data : ALIGN(4K)
     {
         *(.data)
-    }
+    } :data
 
-    .bss BLOCK(4K) : ALIGN(4K)
+    .bss : ALIGN(4K)
     {
         *(COMMON)
         *(.bss)
-        . = ALIGN(4K);
-    _kernel_end = .;
+    } :data
+
+    /DISCARD/ :
+    {
+        *(.note.gnu.property)
+        *(.note.gnu.build-id)
+        *(.comment)
+        *(.eh_frame)
     }
+
+    . = ALIGN(4K);
+    _kernel_end = .;
 }

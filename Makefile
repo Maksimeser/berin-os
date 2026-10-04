@@ -1,19 +1,25 @@
+# Berin OS - Makefile (x86_64, Stage 1)
+
 CC      := gcc
 AS      := nasm
 LD      := ld
-INCLUDES := -Idrivers -Idrivers/fonts -Ikernel -Iarch/i386 -Imm -Ii18n
 
-CFLAGS  := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
-           -fno-pic -fno-pie -Wall -Wextra -O2 \
-           -nostdlib -nostartfiles -nodefaultlibs $(INCLUDES)
-ASFLAGS := -f elf32
-LDFLAGS := -m elf_i386 -T linker.ld -nostdlib
+CFLAGS  := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
+           -fno-pic -fno-pie -mno-red-zone -mno-sse -mno-sse2 \
+           -mno-mmx -mno-avx -mno-80387 -mgeneral-regs-only \
+           -Wall -Wextra -O2 \
+           -nostdlib -nostartfiles -nodefaultlibs \
+           -Iarch/x86_64 -Idrivers -Ikernel
+ASFLAGS := -f elf64
+LDFLAGS := -m elf_x86_64 -T linker.ld -nostdlib
 
 BUILD   := build
 KERNEL  := berin.bin
 
-C_SRCS   := kernel/kernel.c kernel/kerbash.c kernel/panic.c kernel/timer.c kernel/wait.c drivers/serial.c drivers/keyboard.c drivers/rtc.c drivers/vga_font.c i18n/i18n.c i18n/en.c i18n/ru.c mm/pmm.c mm/paging.c mm/heap.c arch/i386/gdt.c arch/i386/idt.c arch/i386/pic.c arch/i386/pit.c
-ASM_SRCS := boot/boot.asm arch/i386/isr_stubs.asm
+C_SRCS   := kernel/kernel.c kernel/panic.c \
+            arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
+            drivers/keyboard.c
+ASM_SRCS := boot/boot.asm arch/x86_64/isr_stubs.asm
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
@@ -35,7 +41,7 @@ $(BUILD)/%.o: %.asm
 	$(AS) $(ASFLAGS) $< -o $@
 
 run: $(KERNEL)
-	qemu-system-i386 -kernel $(KERNEL) -m 128M -serial stdio \
+	qemu-system-x86_64 -kernel $(KERNEL) -m 128M -serial stdio \
 	    -no-reboot -d int -D qemu.log
 
 clean:
