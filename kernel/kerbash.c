@@ -104,6 +104,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  wtest         wait spinner demo (OK)\n");
     term_write("  wfail         wait spinner demo (FAIL)\n");
     term_write("  ptest         progress bar demo\n");
+    term_write("  bfetch        system info with Sorsha logo\n");
     term_write("  colors        ANSI color demo\n");
     return 0;
 }
@@ -199,7 +200,7 @@ static const struct version_entry versions[] = {
     { "pit",      "0.1",         "100 Hz" },
     { "timer",    "0.1",         "tick counter" },
     { "pmm",      "0.1",         "bitmap, 4K pages" },
-    { "paging",   "0.1",         "2-level, identity-map" },
+    { "paging",   "0.1",         "2-level, identity-map"},
     { NULL, NULL, NULL }
 };
 
@@ -426,6 +427,78 @@ static int builtin_kmtest(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_bfetch(int argc, char **argv) {
+    (void)argc; (void)argv;
+
+    uint32_t t     = (uint32_t)timer_ticks();
+    uint32_t hz    = timer_hz();
+    uint32_t sec   = t / hz;
+    uint32_t frac  = t % hz;
+    uint32_t used  = pmm_used_pages();
+    uint32_t total = pmm_total_pages();
+    uint32_t free_ = pmm_free_pages();
+
+    term_putchar('\n');
+
+    /* left column: art (up to ~16 chars).
+     *      right column: info, starts at visual column 24. */
+
+    /* line 1: OS */
+    term_write("\033[92m      /\\     /\\\033[0m");
+    term_write("       ");
+    term_write("\033[96mOS      \033[0m");
+    term_write("\033[93mBerin OS 0.0.1\033[0m\n");
+
+    /* line 2: vendor */
+    term_write("\033[92m     /  \\___/  \\\033[0m");
+    term_write("       ");
+    term_write("\033[96mvendor  \033[0m");
+    term_write("Turker Games\n");
+
+    /* line 3: kernel */
+    term_write("\033[92m    (  o   o  )\033[0m");
+    term_write("       ");
+    term_write("\033[96mkernel  \033[0m");
+    term_write("i386, 0.0.1\n");
+
+    /* line 4: shell */
+    term_write("\033[92m     \\   \x1F   /\033[0m");
+    term_write("       ");
+    term_write("\033[96mshell   \033[0m");
+    term_write("kerbash 0.1\n");
+
+    /* line 5: uptime */
+    term_write("\033[92m      \\_____/\033[0m");
+    term_write("       ");
+    term_write("\033[96muptime  \033[0m");
+    term_write("\033[93m");
+    put_u32(sec);
+    term_putchar('.');
+    if (frac < 10) term_putchar('0');
+    put_u32(frac);
+    term_write("s\033[0m\n");
+
+    /* line 6: mem (no art) */
+    term_write("                    ");
+    term_write("\033[96mmem     \033[0m");
+    term_write("\033[93m");
+    put_u32(used * 4 / 1024);
+    term_write(" MB\033[0m / ");
+    put_u32(total * 4 / 1024);
+    term_write(" MB\n");
+
+    /* line 7: pages (no art) */
+    term_write("                    ");
+    term_write("\033[96mpages   \033[0m");
+    put_u32(free_);
+    term_write(" free / ");
+    put_u32(total);
+    term_write(" total\n");
+
+    term_putchar('\n');
+    return 0;
+}
+
 /* ---------- dispatch table ---------- */
 
 struct builtin {
@@ -516,6 +589,7 @@ static struct builtin builtins[] = {
     { "wtest",   builtin_wtest   },
     { "wfail",   builtin_wfail   },
     { "ptest",   builtin_ptest   },
+    { "bfetch",  builtin_bfetch  },
     { NULL, NULL },
 };
 
