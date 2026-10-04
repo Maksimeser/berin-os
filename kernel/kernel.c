@@ -74,9 +74,9 @@ static inline uint16_t vga_entry(unsigned char c, uint8_t color) {
 static inline void term_update_color(void) {
     term_color = (uint8_t)((term_bg << 4) | (term_fg & 0x0F));
 }
-static void term_set_fg(uint8_t fg) { term_fg = fg & 0x0F; term_update_color(); }
-static void term_set_bg(uint8_t bg) { term_bg = bg & 0x0F; term_update_color(); }
-static void term_reset_color(void)  { term_fg = C_GRAY; term_bg = C_BLACK; term_update_color(); }
+void term_set_fg(uint8_t fg) { term_fg = fg & 0x0F; term_update_color(); }
+void term_set_bg(uint8_t bg) { term_bg = bg & 0x0F; term_update_color(); }
+void term_reset_color(void)  { term_fg = C_GRAY; term_bg = C_BLACK; term_update_color(); }
 
 void term_clear(void) {
     for (size_t y = 0; y < VGA_HEIGHT; y++)
@@ -212,6 +212,13 @@ static void reboot_now(void) {
     for (;;) __asm__ __volatile__("hlt");
 }
 
+static void logoff_now(void) {
+    outw(0x604, 0x2000);
+    outw(0x4004, 0x2000);
+    outw(0xB004, 0x2000);
+    for (;;) __asm__ __volatile__("cli; hlt");
+}
+
 static int builtin_echo(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (i > 1) term_putchar(' ');
@@ -233,8 +240,9 @@ static int builtin_help(int argc, char **argv) {
     term_write("  uptime        ticks since boot\n");
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
-    term_write("  reboot        reboot machine\n");
     term_write("  halt          halt CPU\n");
+    term_write("  reboot        reboot machine\n");
+    term_write("  logoff        shut down (ACPI)\n");
     return 0;
 }
 
@@ -320,6 +328,13 @@ static int builtin_pf(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_logoff(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("[ INFO ] logoff: halting\n");
+    logoff_now();
+    return 42;
+}
+
 static int builtin_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ INFO ] reboot: resetting\n");
@@ -351,6 +366,7 @@ static struct builtin builtins[] = {
     { "pf",     builtin_pf     },
     { "reboot", builtin_reboot },
     { "halt",   builtin_halt   },
+    { "logoff", builtin_logoff },
     { 0, 0 },
 };
 

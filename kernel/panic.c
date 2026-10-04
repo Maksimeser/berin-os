@@ -24,7 +24,7 @@ void berin_panic(uint16_t code, const char *name, struct regs *r) {
     extern void term_clear(void);
     extern void term_reset_color(void);
     term_reset_color();
-    term_set_fg(4);
+        term_set_fg(12);
     term_set_bg(0);
     term_clear();
     term_write("\n\n\033[91m");
