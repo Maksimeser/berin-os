@@ -8,7 +8,7 @@ const char *i18n_ru[MSG_COUNT] = {
     [MSG_WARN]           = "[ ВНИМ ]",
     [MSG_FAIL]           = "[ ОШИБ ]",
     [MSG_INFO]           = "[ ИНФО ]",
-    [MSG_HELP_HEADER]    = "berbash 0.1 — встроенные:",
+    [MSG_HELP_HEADER]    = "kerbash 0.1 — встроенные:",
     [MSG_LOCALE_SET]     = "локаль переключена на",
     [MSG_LOCALE_CURRENT] = "текущая локаль:",
 };

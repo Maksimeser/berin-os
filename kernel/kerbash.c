@@ -1,4 +1,4 @@
-/* Berin OS - berbash 0.1*/
+/* Berin - kerbash 0.1*/
 #include "i18n.h"
 #include "heap.h"
 #include <stdint.h>
@@ -13,13 +13,10 @@
 #include "wait.h"
 
 extern void term_write(const char *s);
-extern void term_write(const char *s);
 extern void term_putchar(char c);
 extern void term_set_fg(uint8_t fg);
 extern void term_set_bg(uint8_t bg);
 extern void term_reset_color(void);
-extern void term_putchar(char c);
-extern void term_set_fg(uint8_t fg);
 
 #define MAX_LINE 256
 #define MAX_ARGS 16
@@ -87,7 +84,7 @@ static int builtin_echo(int argc, char **argv) {
 
 static int builtin_help(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("berbash 0.1 - builtins:\n");
+    term_write("kerbash 0.1 - builtins:\n");
     term_write("  echo <args>   print arguments\n");
     term_write("  help          this message\n");
     term_write("  clear         clear screen\n");
@@ -191,7 +188,7 @@ struct version_entry {
 
 static const struct version_entry versions[] = {
     { "kernel",   BERIN_VERSION, "i386, protected mode" },
-    { "berbash",  "0.1",         "shell" },
+    { "kerbash",  "0.1",         "Kernel shell, ring 0" },
     { "serial",   "0.1",         "COM1 115200 8N1" },
     { "keyboard", "0.1",         "PS/2 scancode set 1" },
     { "rtc",      "0.1",         "CMOS 0x70/0x71" },
@@ -271,7 +268,6 @@ static int builtin_versi(int argc, char **argv) {
             }
         }
         term_reset_color();
-        term_set_fg(C_RED);
         term_set_fg(C_RED);
         term_write("version_not_found: ");
         term_write(target);
@@ -592,8 +588,8 @@ static int tokenize(char *s, char **argv, int max) {
 
 /* ---------- entry ---------- */
 
-void berbash_run(void) {
-    term_write("berbash 0.1\n");
+void kerbash_run(void) {
+    term_write("kerbash 0.1\n");
     term_write("type 'help' for builtins, 'logoff' to shut down\n\n");
 
     for (;;) {

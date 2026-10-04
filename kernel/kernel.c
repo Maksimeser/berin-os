@@ -1,4 +1,4 @@
-/* BerinOS - kernel */
+/* Berin - kernel */
 #include "vga_font.h"
 #include "heap.h"
 #include "version.h"
@@ -119,7 +119,7 @@ void term_write(const char *s) {
     while (*s) term_putchar(*s++);
 }
 
-extern void berbash_run(void);
+extern void kerbash_run(void);
 
 void kernel_main(uint32_t magic, uint32_t mb_info) {
     (void)magic;
@@ -160,7 +160,7 @@ void kernel_main(uint32_t magic, uint32_t mb_info) {
 
     term_write("\n");
 
-    berbash_run();
+    kerbash_run();
 
     for (;;)
         __asm__ __volatile__("hlt");
