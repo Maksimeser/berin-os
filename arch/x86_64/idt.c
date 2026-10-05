@@ -1,7 +1,8 @@
-/* Berin - x86_64 IDT + dispatch */
+/* Berin OS - x86_64 IDT + dispatch */
 
 #include "idt.h"
 #include "pic.h"
+#include "syscall.h"
 
 extern void berin_panic(uint16_t code, const char *name, struct regs *r);
 extern void timer_tick(void);
@@ -61,6 +62,11 @@ static void map_int_to_panic(uint64_t n, uint16_t *code, const char **name) {
 }
 
 void isr_handler(struct regs *r) {
+    if (r->int_no == 0x80) {
+        syscall_dispatch(r);
+        return;
+    }
+
     if (r->int_no >= 32 && r->int_no < 48) {
         uint8_t irq = (uint8_t)(r->int_no - 32);
         if (irq == 0) timer_tick();
@@ -68,7 +74,9 @@ void isr_handler(struct regs *r) {
         pic_eoi(irq);
         return;
     }
-    uint16_t code; const char *name;
+
+    uint16_t code;
+    const char *name;
     map_int_to_panic(r->int_no, &code, &name);
     berin_panic(code, name, r);
 }
@@ -77,8 +85,10 @@ void idt_init(void) {
     idtp.limit = sizeof(idt) - 1;
     idtp.base  = (uint64_t)&idt;
 
-    for (int i = 0; i < 256; i++)
-        idt_set(i, isr_stub_table[i], 0x08, 0x8E);
+    for (int i = 0; i < 256; i++) {
+        uint8_t flags = (i == 0x80) ? 0xEE : 0x8E;
+        idt_set(i, isr_stub_table[i], 0x08, flags);
+    }
 
     __asm__ __volatile__("lidt %0" : : "m"(idtp));
 }

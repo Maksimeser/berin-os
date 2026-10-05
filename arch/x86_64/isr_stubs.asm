@@ -60,6 +60,17 @@ ISR_NOERR 31
 
 extern isr_handler
 
+global enter_user_mode
+enter_user_mode:
+    ; rdi = user entry, rsi = user rsp
+    mov rax, rsi
+    push qword 0x23        ; SS  (user data | RPL 3)
+    push rax               ; RSP (user)
+    push qword 0x202       ; RFLAGS (IF=1)
+    push qword 0x1B        ; CS  (user code | RPL 3)
+    push rdi               ; RIP (user entry)
+    iretq
+
 isr_common:
     ; save all GPRs (order must match struct regs)
     push rax

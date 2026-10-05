@@ -39,21 +39,21 @@ _start:
     jmp dword 0x08:long_mode_entry
 
 setup_paging:
-    mov eax, pdpt
-    or  eax, 0x03
+      mov eax, pdpt
+    or  eax, 0x07
     mov [pml4], eax
     mov dword [pml4 + 4], 0
 
+    ; PDPT[0] -> PD
     mov eax, pd
-    or  eax, 0x03
+    or  eax, 0x07
     mov [pdpt], eax
-    mov dword [pdpt + 4], 0
 
     xor ecx, ecx
 .fill_pd:
     mov eax, ecx
     shl eax, 21
-    or  eax, 0x83
+    or  eax, 0x87
     mov [pd + ecx * 8], eax
     mov dword [pd + ecx * 8 + 4], 0
     inc ecx

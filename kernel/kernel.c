@@ -3,6 +3,7 @@
  */
 #include "heap.h"
 #include "pmm.h"
+#include "gdt.h"
 #include "paging.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -122,13 +123,34 @@ static void term_emit(char c) {
 static int ansi_state = 0;
 static int ansi_param = 0;
 
+static const uint8_t ansi_to_vga[8] = {
+    0,  /* 30 black   -> VGA 0 */
+    4,  /* 31 red     -> VGA 4 */
+    2,  /* 32 green   -> VGA 2 */
+    6,  /* 33 yellow  -> VGA 6 */
+    1,  /* 34 blue    -> VGA 1 */
+    5,  /* 35 magenta -> VGA 5 */
+    3,  /* 36 cyan    -> VGA 3 */
+    7,  /* 37 white   -> VGA 7 */
+};
+static const uint8_t ansi_to_vga_bright[8] = {
+    8,   /* 90 br.black   -> VGA 8  (dark gray)   */
+    12,  /* 91 br.red     -> VGA 12 (light red)   */
+    10,  /* 92 br.green   -> VGA 10 (light green) */
+    14,  /* 93 br.yellow  -> VGA 14 (yellow)      */
+    9,   /* 94 br.blue    -> VGA 9  (light blue)  */
+    13,  /* 95 br.magenta -> VGA 13 (light magenta)*/
+    11,  /* 96 br.cyan    -> VGA 11 (light cyan)  */
+    15,  /* 97 br.white   -> VGA 15 (white)       */
+};
+
 static void ansi_sgr(int p) {
     if (p == 0)                    term_reset_color();
     else if (p == 1)               ;
-    else if (p >= 30 && p <= 37)   term_set_fg((uint8_t)(p - 30));
-    else if (p >= 40 && p <= 47)   term_set_bg((uint8_t)(p - 40));
-    else if (p >= 90 && p <= 97)   term_set_fg((uint8_t)(p - 90 + 8));
-    else if (p >= 100 && p <= 107) term_set_bg((uint8_t)(p - 100 + 8));
+    else if (p >= 30 && p <= 37)   term_set_fg(ansi_to_vga[p - 30]);
+    else if (p >= 40 && p <= 47)   term_set_bg(ansi_to_vga[p - 40]);
+    else if (p >= 90 && p <= 97)   term_set_fg(ansi_to_vga_bright[p - 90]);
+    else if (p >= 100 && p <= 107) term_set_bg(ansi_to_vga_bright[p - 100]);
 }
 
 void term_putchar(char c) {
@@ -244,6 +266,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  about         about Berin OS\n");
     term_write("  versi         show versions\n");
     term_write("  colors        ANSI color demo\n");
+    term_write("  r3test        enter ring 3, run user program\n");
     term_write("  uptime        ticks since boot\n");
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
@@ -382,6 +405,42 @@ static int builtin_kmtest(int argc, char **argv) {
     return 0;
 }
 
+extern void enter_user_mode(uint64_t entry, uint64_t user_rsp);
+
+static const uint8_t user_prog[] = {
+    0x48,0xC7,0xC0,0x01,0x00,0x00,0x00,   /* mov rax, 1        */
+    0x48,0xC7,0xC7,0x01,0x00,0x00,0x00,   /* mov rdi, 1        */
+    0x48,0x8D,0x35,0x15,0x00,0x00,0x00,   /* lea rsi, [rel msg]*/
+    0x48,0xC7,0xC2,0x0D,0x00,0x00,0x00,   /* mov rdx, 13       */
+    0xCD,0x80,                            /* int 0x80          */
+    0x48,0xC7,0xC0,0x3C,0x00,0x00,0x00,   /* mov rax, 60       */
+    0x48,0x31,0xFF,                       /* xor rdi, rdi      */
+    0xCD,0x80,                            /* int 0x80          */
+    'H','e','l','l','o',' ','f','r','o','m',' ','R','3','\n',
+};
+
+static int builtin_ring3test(int argc, char **argv) {
+    (void)argc; (void)argv;
+
+    void *code  = pmm_alloc_page();
+    void *stack = pmm_alloc_page();
+    if (!code || !stack) {
+        term_write("alloc failed\n");
+        return 0;
+    }
+
+    uint8_t *dst = (uint8_t *)code;
+    for (unsigned i = 0; i < sizeof(user_prog); i++) dst[i] = user_prog[i];
+
+    term_write("[user] entering ring 3...\n");
+
+    uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
+    enter_user_mode((uint64_t)code, user_rsp);
+
+    term_write("[user] returned?!\n");
+    return 0;
+}
+
 static int builtin_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ INFO ] reboot: resetting\n");
@@ -459,6 +518,7 @@ static struct builtin builtins[] = {
     { "about",  builtin_about  },
     { "versi",  builtin_versi  },
     { "colors", builtin_colors },
+    { "r3test", builtin_ring3test },
     { "uptime", builtin_uptime },
     { "crash",  builtin_crash  },
     { "pf",     builtin_pf     },
@@ -538,6 +598,7 @@ static void kerbash_run(void) {
  * ============================================================ */
 void kernel_main(void) {
     serial_init();
+    gdt_init();
 
     term_set_fg(C_LGREEN);
     term_set_bg(C_BLACK);

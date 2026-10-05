@@ -17,7 +17,8 @@ BUILD   := build
 KERNEL  := berin.bin
 
 C_SRCS   := kernel/kernel.c kernel/panic.c \
-            arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
+            arch/x86_64/gdt.c arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
+            arch/x86_64/syscall.c \
             drivers/keyboard.c \
             mm/pmm.c mm/paging.c mm/heap.c
 ASM_SRCS := boot/boot.asm arch/x86_64/isr_stubs.asm
