@@ -1,7 +1,9 @@
-/* Berin - kernel x86_64 (Stage 2)
+/* Berin - kernel x86_64 (Stage 4)
  * VGA + serial + ANSI + IDT + PIC + PIT + PS/2 keyboard + kerbash + panic
  */
-
+#include "heap.h"
+#include "pmm.h"
+#include "paging.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "idt.h"
@@ -183,6 +185,18 @@ static int str_eq(const char *a, const char *b) {
     return *a == '\0' && *b == '\0';
 }
 
+static void put_u64(uint64_t v) {
+    char r[24]; int ri = 0;
+    if (v == 0) { term_putchar('0'); return; }
+    while (v) { r[ri++] = '0' + (v % 10); v /= 10; }
+    while (ri) term_putchar(r[--ri]);
+}
+
+static void put_hex64(uint64_t v) {
+    for (int i = 60; i >= 0; i -= 4)
+        term_putchar("0123456789ABCDEF"[(v >> i) & 0xF]);
+}
+
 static int tokenize(char *s, char **argv, int max) {
     int argc = 0;
     while (*s && argc < max) {
@@ -193,13 +207,6 @@ static int tokenize(char *s, char **argv, int max) {
         if (*s) *s++ = '\0';
     }
     return argc;
-}
-
-static void put_u64(uint64_t v) {
-    char r[24]; int ri = 0;
-    if (v == 0) { term_putchar('0'); return; }
-    while (v) { r[ri++] = '0' + (v % 10); v /= 10; }
-    while (ri) term_putchar(r[--ri]);
 }
 
 static void reboot_now(void) {
@@ -241,7 +248,12 @@ static int builtin_help(int argc, char **argv) {
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
     term_write("  halt          halt CPU\n");
+    term_write("  meminfo       physical memory summary\n");
+    term_write("  memtest       alloc 3 pages, free, verify\n");
+    term_write("  paging        paging status (CR3, CR2)\n");
     term_write("  reboot        reboot machine\n");
+    term_write("  heap          kernel heap usage\n");
+    term_write("  kmtest        kmalloc/kfree round-trip\n");
     term_write("  logoff        shut down (ACPI)\n");
     return 0;
 }
@@ -335,11 +347,97 @@ static int builtin_logoff(int argc, char **argv) {
     return 42;
 }
 
+static int builtin_heap(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("kernel heap:\n");
+    term_write("  total: "); put_u64(heap_total()); term_write(" B\n");
+    term_write("  used:  "); put_u64(heap_used());  term_write(" B\n");
+    term_write("  free:  "); put_u64(heap_free());  term_write(" B\n");
+    return 0;
+}
+
+static int builtin_kmtest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint64_t before = heap_used();
+
+    void *a = kmalloc(64);
+    void *b = kmalloc(128);
+    void *c = kmalloc(32);
+
+    term_write("a=0x"); put_hex64((uint64_t)a); term_putchar('\n');
+    term_write("b=0x"); put_hex64((uint64_t)b); term_putchar('\n');
+    term_write("c=0x"); put_hex64((uint64_t)c); term_putchar('\n');
+
+    if (a) { for (int i = 0; i < 64;  i++) ((uint8_t *)a)[i] = 0xAA; }
+    if (b) { for (int i = 0; i < 128; i++) ((uint8_t *)b)[i] = 0xBB; }
+    if (c) { for (int i = 0; i < 32;  i++) ((uint8_t *)c)[i] = 0xCC; }
+
+    kfree(b);
+    kfree(a);
+    kfree(c);
+
+    uint64_t after = heap_used();
+    if (after == before) term_write("heap restored: OK\n");
+    else                 term_write("heap MISMATCH\n");
+    return 0;
+}
+
 static int builtin_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ INFO ] reboot: resetting\n");
     reboot_now();
     return 42;
+}
+
+static int builtin_meminfo(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint64_t total = pmm_total_pages();
+    uint64_t free_ = pmm_free_pages();
+    uint64_t used  = pmm_used_pages();
+
+    term_write("physical memory (4K pages):\n");
+    term_write("  total: "); put_u64(total); term_write(" pages = "); put_u64(total * 4 / 1024); term_write(" MB\n");
+    term_write("  used:  "); put_u64(used);  term_write(" pages = "); put_u64(used  * 4 / 1024); term_write(" MB\n");
+    term_write("  free:  "); put_u64(free_); term_write(" pages = "); put_u64(free_ * 4 / 1024); term_write(" MB\n");
+    return 0;
+}
+
+static int builtin_memtest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint64_t before = pmm_free_pages();
+
+    void *a = pmm_alloc_page();
+    void *b = pmm_alloc_page();
+    void *c = pmm_alloc_page();
+
+    term_write("a=0x"); put_hex64((uint64_t)a); term_putchar('\n');
+    term_write("b=0x"); put_hex64((uint64_t)b); term_putchar('\n');
+    term_write("c=0x"); put_hex64((uint64_t)c); term_putchar('\n');
+
+    pmm_free_page(b);
+    pmm_free_page(a);
+    pmm_free_page(c);
+
+    uint64_t after = pmm_free_pages();
+    if (after == before) term_write("free pages restored: OK\n");
+    else                 term_write("free pages MISMATCH\n");
+    return 0;
+}
+
+static int builtin_paging(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("paging:\n");
+    term_write("  enabled : ");
+    term_write(paging_enabled() ? "yes" : "no");
+    term_putchar('\n');
+    term_write("  CR3     : 0x"); put_hex64(paging_get_cr3()); term_putchar('\n');
+    term_write("  CR2     : 0x"); put_hex64(paging_get_cr2()); term_putchar('\n');
+
+    volatile uint64_t *probe = (volatile uint64_t *)0x100000;
+    uint64_t v = *probe;
+    term_write("  probe[0x100000] = 0x"); put_hex64(v); term_putchar('\n');
+    term_write("  identity map: OK\n");
+    return 0;
 }
 
 static int builtin_halt(int argc, char **argv) {
@@ -365,7 +463,12 @@ static struct builtin builtins[] = {
     { "crash",  builtin_crash  },
     { "pf",     builtin_pf     },
     { "reboot", builtin_reboot },
+    { "heap",    builtin_heap    },
+    { "kmtest",  builtin_kmtest  },
     { "halt",   builtin_halt   },
+    { "meminfo", builtin_meminfo },
+    { "memtest", builtin_memtest },
+    { "paging",  builtin_paging  },
     { "logoff", builtin_logoff },
     { 0, 0 },
 };
@@ -440,6 +543,8 @@ void kernel_main(void) {
     term_set_bg(C_BLACK);
     term_clear();
 
+    heap_init();
+    pmm_init();
     idt_init();
     pic_remap();
     pit_init(100);
