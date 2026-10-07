@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "idt.h"
+#include "elf.h"
+#include "hello_elf.h"
 #include "pic.h"
 #include "pit.h"
 #include "keyboard.h"
@@ -266,7 +268,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  about         about Berin OS\n");
     term_write("  versi         show versions\n");
     term_write("  colors        ANSI color demo\n");
-    term_write("  r3test        enter ring 3, run user program\n");
+    term_write("  elf           load and run hello.elf (ELF64)\n");
     term_write("  uptime        ticks since boot\n");
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
@@ -407,45 +409,26 @@ static int builtin_kmtest(int argc, char **argv) {
 
 extern void enter_user_mode(uint64_t entry, uint64_t user_rsp);
 
-static const uint8_t user_prog[] = {
-    0x48,0xC7,0xC0,0x01,0x00,0x00,0x00,   /* mov rax, 1        */
-    0x48,0xC7,0xC7,0x01,0x00,0x00,0x00,   /* mov rdi, 1        */
-    0x48,0x8D,0x35,0x15,0x00,0x00,0x00,   /* lea rsi, [rel msg]*/
-    0x48,0xC7,0xC2,0x0D,0x00,0x00,0x00,   /* mov rdx, 13       */
-    0xCD,0x80,                            /* int 0x80          */
-    0x48,0xC7,0xC0,0x3C,0x00,0x00,0x00,   /* mov rax, 60       */
-    0x48,0x31,0xFF,                       /* xor rdi, rdi      */
-    0xCD,0x80,                            /* int 0x80          */
-    'H','e','l','l','o',' ','f','r','o','m',' ','R','3','\n',
-};
-
-static int builtin_ring3test(int argc, char **argv) {
+static int builtin_elf_test(int argc, char **argv) {
     (void)argc; (void)argv;
 
-    void *code  = pmm_alloc_page();
     void *stack = pmm_alloc_page();
-    if (!code || !stack) {
-        term_write("alloc failed\n");
+    if (!stack) { term_write("[elf] stack alloc failed\n"); return 0; }
+
+    uint64_t entry = 0;
+    if (elf_load(hello_elf, hello_elf_size, &entry) != 0) {
+        term_write("[elf] load failed\n");
         return 0;
     }
 
-    uint8_t *dst = (uint8_t *)code;
-    for (unsigned i = 0; i < sizeof(user_prog); i++) dst[i] = user_prog[i];
-
-    term_write("[user] entering ring 3...\n");
+    term_write("[elf] loaded, entry=0x"); put_hex64(entry); term_putchar('\n');
+    term_write("[elf] entering ring 3...\n");
 
     uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
-    enter_user_mode((uint64_t)code, user_rsp);
+    enter_user_mode(entry, user_rsp);
 
-    term_write("[user] returned?!\n");
+    term_write("[elf] returned?!\n");
     return 0;
-}
-
-static int builtin_reboot(int argc, char **argv) {
-    (void)argc; (void)argv;
-    term_write("[ INFO ] reboot: resetting\n");
-    reboot_now();
-    return 42;
 }
 
 static int builtin_meminfo(int argc, char **argv) {
@@ -506,6 +489,13 @@ static int builtin_halt(int argc, char **argv) {
     return 42;
 }
 
+static int builtin_reboot(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("[ INFO ] reboot: resetting\n");
+    reboot_now();
+    return 42;
+}
+
 struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
@@ -518,7 +508,7 @@ static struct builtin builtins[] = {
     { "about",  builtin_about  },
     { "versi",  builtin_versi  },
     { "colors", builtin_colors },
-    { "r3test", builtin_ring3test },
+    { "elf",    builtin_elf_test },
     { "uptime", builtin_uptime },
     { "crash",  builtin_crash  },
     { "pf",     builtin_pf     },
@@ -597,7 +587,17 @@ static void kerbash_run(void) {
  *  Entry
  * ============================================================ */
 void kernel_main(void) {
-    serial_init();
+    serial_init(); {
+        uint64_t cr0, cr4;
+        __asm__ __volatile__("mov %%cr0, %0" : "=r"(cr0));
+        cr0 &= ~(1ULL << 2);
+        cr0 |=  (1ULL << 1);
+        __asm__ __volatile__("mov %0, %%cr0" :: "r"(cr0));
+
+        __asm__ __volatile__("mov %%cr4, %0" : "=r"(cr4));
+        cr4 |= (1ULL << 9) | (1ULL << 10);
+        __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4));
+    }
     gdt_init();
 
     term_set_fg(C_LGREEN);
