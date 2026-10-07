@@ -3,6 +3,7 @@
  */
 #include "heap.h"
 #include "pmm.h"
+#include "ata.h"
 #include "gdt.h"
 #include "paging.h"
 #include <stdint.h>
@@ -273,6 +274,8 @@ static int builtin_help(int argc, char **argv) {
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
     term_write("  halt          halt CPU\n");
+    term_write("  ata           ATA drive info\n");
+    term_write("  atatest       ATA read/write test (sector 100)\n");
     term_write("  whoami        print current user\n");
     term_write("  meminfo       physical memory summary\n");
     term_write("  memtest       alloc 3 pages, free, verify\n");
@@ -497,6 +500,68 @@ static int builtin_reboot(int argc, char **argv) {
     return 42;
 }
 
+static int builtin_ata(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int rc = ata_init();
+    if (rc != 0) {
+        term_write("[ FAIL ] ata_init: ");
+        put_u64((uint64_t)rc);
+        term_putchar('\n');
+        return 0;
+    }
+    term_write("[ OK ] ata: ");
+    term_write(ata_model());
+    term_write("\n  sectors: ");
+    put_u64(ata_sector_count());
+    term_write("  (");
+    put_u64(ata_sector_count() * 512 / 1024 / 1024);
+    term_write(" MB)\n");
+    return 0;
+}
+
+static int builtin_atatest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    static uint8_t buf[512];
+
+    term_write("[ ata ] reading sector 0...\n");
+    if (ata_read_sectors(0, 1, buf) != 0) {
+        term_write("[ FAIL ] read\n");
+        return 0;
+    }
+    term_write("  first 16 bytes: ");
+    for (int i = 0; i < 16; i++) {
+        term_putchar("0123456789ABCDEF"[(buf[i] >> 4) & 0xF]);
+        term_putchar("0123456789ABCDEF"[buf[i] & 0xF]);
+        term_putchar(' ');
+    }
+    term_putchar('\n');
+
+    /* write test */
+    for (int i = 0; i < 512; i++) buf[i] = (uint8_t)(i & 0xFF);
+    if (ata_write_sectors(100, 1, buf) != 0) {
+        term_write("[ FAIL ] write\n");
+        return 0;
+    }
+    term_write("[ OK ] wrote sector 100\n");
+
+    /* read back */
+    static uint8_t buf2[512];
+    if (ata_read_sectors(100, 1, buf2) != 0) {
+        term_write("[ FAIL ] read back\n");
+        return 0;
+    }
+    for (int i = 0; i < 512; i++) {
+        if (buf2[i] != (uint8_t)(i & 0xFF)) {
+            term_write("[ FAIL ] mismatch at ");
+            put_u64((uint64_t)i);
+            term_putchar('\n');
+            return 0;
+        }
+    }
+    term_write("[ OK ] read back matches\n");
+    return 0;
+}
+
 static int builtin_whoami(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("root\n");
@@ -517,6 +582,8 @@ static struct builtin builtins[] = {
     { "colors", builtin_colors },
     { "elf",    builtin_elf_test },
     { "uptime", builtin_uptime },
+    { "ata",     builtin_ata     },
+    { "atatest", builtin_atatest },
     { "crash",  builtin_crash  },
     { "pf",     builtin_pf     },
     { "reboot", builtin_reboot },

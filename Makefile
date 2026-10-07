@@ -19,7 +19,7 @@ KERNEL  := berin.bin
 C_SRCS   := kernel/kernel.c kernel/panic.c kernel/elf.c \
             arch/x86_64/gdt.c arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
             arch/x86_64/syscall.c \
-            drivers/keyboard.c \
+            drivers/keyboard.c drivers/ata.c \
             mm/pmm.c mm/paging.c mm/heap.c
 ASM_SRCS := boot/boot.asm arch/x86_64/isr_stubs.asm
 
@@ -44,6 +44,7 @@ $(BUILD)/%.o: %.asm
 
 run: $(KERNEL)
 	qemu-system-x86_64 -kernel $(KERNEL) -m 128M -serial stdio \
+	    -drive file=disk.img,format=raw,if=ide \
 	    -no-reboot -d int -D qemu.log
 
 clean:
