@@ -273,6 +273,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
     term_write("  halt          halt CPU\n");
+    term_write("  whoami        print current user\n");
     term_write("  meminfo       physical memory summary\n");
     term_write("  memtest       alloc 3 pages, free, verify\n");
     term_write("  paging        paging status (CR3, CR2)\n");
@@ -496,6 +497,12 @@ static int builtin_reboot(int argc, char **argv) {
     return 42;
 }
 
+static int builtin_whoami(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("root\n");
+    return 0;
+}
+
 struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
@@ -517,6 +524,7 @@ static struct builtin builtins[] = {
     { "kmtest",  builtin_kmtest  },
     { "halt",   builtin_halt   },
     { "meminfo", builtin_meminfo },
+    { "whoami", builtin_whoami },
     { "memtest", builtin_memtest },
     { "paging",  builtin_paging  },
     { "logoff", builtin_logoff },
