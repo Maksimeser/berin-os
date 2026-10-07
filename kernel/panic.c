@@ -2,6 +2,7 @@
  * Marker: (1panic1)-NNN_name
  */
 #include "panic.h"
+#include "io.h"
 #include "term.h"
 
 static void put_hex64(uint64_t v) {
@@ -58,5 +59,30 @@ void berin_panic(uint16_t code, const char *name, struct regs *r) {
     term_write("  Reboot : [Ctrl+Alt+Del]\n");
     term_write("===============================================\n");
 
-    for (;;) __asm__ __volatile__("cli; hlt");
+    /* Ctrl+Alt+Del polling — we can't use IRQ here (interrupts off).
+     * Scancode sequence: Ctrl=0x1D, Alt=0x38, Del=0x53. */
+__asm__ __volatile__("cli");
+int have_ctrl = 0, have_alt = 0;
+    for (;;) {
+        if (inb(0x64) & 0x01) {
+            uint8_t sc = inb(0x60);
+            if (sc == 0x1D) have_ctrl = 1;
+            else if (sc == 0x38) have_alt = 1;
+            else if (sc == 0x53 && have_ctrl && have_alt) {
+                /* hardware reset via 8042 */
+                while (inb(0x64) & 0x02) ;
+                outb(0x64, 0xFE);
+                /* fallback: ACPI reset */
+                outw(0x604, 0x2000);
+                outb(0xCF9, 0x06);
+                /* if nothing worked — hang */
+                for (;;) __asm__ __volatile__("cli; hlt");
+            }
+            /* release codes — reset flags */
+            else if (sc == 0x9D) have_ctrl = 0;
+            else if (sc == 0xB8) have_alt = 0;
+        } else {
+            __asm__ __volatile__("pause");
+        }
+    }
 }
