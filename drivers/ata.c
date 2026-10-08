@@ -1,6 +1,4 @@
-/* Berin - ATA PIO driver (primary master, LBA28)
- * Only reads/writes 512-byte sectors. No DMA, no IRQ (polling).
- */
+/* Berin OS - ATA PIO driver (x86_64, primary master, LBA28) */
 
 #include "ata.h"
 #include "io.h"
@@ -9,7 +7,6 @@
 #define ATA_PRIMARY_CTRL  0x3F6
 
 #define ATA_REG_DATA      0
-#define ATA_REG_ERR       1
 #define ATA_REG_FEAT      1
 #define ATA_REG_SECCOUNT  2
 #define ATA_REG_LBA_LO    3
@@ -29,7 +26,6 @@ static uint32_t g_sector_count = 0;
 static char     g_model[41];
 
 static void ata_io_wait(void) {
-    /* read alt status 4 times */
     for (int i = 0; i < 4; i++) (void)inb(ATA_PRIMARY_CTRL);
 }
 
@@ -47,11 +43,9 @@ static int ata_wait_ready(int check_drq) {
 }
 
 int ata_init(void) {
-    /* select drive 0 */
     outb(ATA_PRIMARY_IO + ATA_REG_DRIVE, 0xA0);
     ata_io_wait();
 
-    /* IDENTIFY (0xEC) */
     outb(ATA_PRIMARY_IO + ATA_REG_SECCOUNT, 0);
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_LO,   0);
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_MID,  0);
@@ -60,27 +54,21 @@ int ata_init(void) {
     ata_io_wait();
 
     uint8_t st = inb(ATA_PRIMARY_IO + ATA_REG_STATUS);
-    if (st == 0) return -1;   /* no drive */
+    if (st == 0) return -1;
 
-        if (ata_wait_ready(0) != 0) return -2;
+    if (ata_wait_ready(0) != 0) return -2;
 
-        /* read 256 words of IDENTIFY */
-        uint16_t id[256];
+    uint16_t id[256];
     for (int i = 0; i < 256; i++)
-        id[i] = (uint16_t)inb(ATA_PRIMARY_IO + ATA_REG_DATA)
-        | ((uint16_t)inb(ATA_PRIMARY_IO + ATA_REG_DATA) << 8);
+        id[i] = inw(ATA_PRIMARY_IO + ATA_REG_DATA);
 
-    /* word 60-61: LBA28 sector count (low 32 bits) */
     g_sector_count = ((uint32_t)id[61] << 16) | id[60];
 
-    /* word 27-46: model string (byte-swapped ASCII) */
     for (int i = 0; i < 20; i++) {
         g_model[i * 2]     = (char)(id[27 + i] >> 8);
         g_model[i * 2 + 1] = (char)(id[27 + i] & 0xFF);
     }
     g_model[40] = 0;
-
-    /* trim trailing spaces */
     for (int i = 39; i >= 0 && g_model[i] == ' '; i--) g_model[i] = 0;
 
     return 0;
@@ -95,16 +83,14 @@ int ata_read_sectors(uint32_t lba, uint8_t count, void *buf) {
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_LO,   (uint8_t)(lba & 0xFF));
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_MID,  (uint8_t)((lba >> 8) & 0xFF));
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_HI,   (uint8_t)((lba >> 16) & 0xFF));
-    outb(ATA_PRIMARY_IO + ATA_REG_CMD, 0x20);   /* READ SECTORS */
+    outb(ATA_PRIMARY_IO + ATA_REG_CMD, 0x20);
     ata_io_wait();
 
     uint16_t *p = (uint16_t *)buf;
     for (int s = 0; s < count; s++) {
         if (ata_wait_ready(1) != 0) return -2;
-        for (int i = 0; i < 256; i++) {
-            *p++ = (uint16_t)inb(ATA_PRIMARY_IO + ATA_REG_DATA)
-            | ((uint16_t)inb(ATA_PRIMARY_IO + ATA_REG_DATA) << 8);
-        }
+        for (int i = 0; i < 256; i++)
+            *p++ = inw(ATA_PRIMARY_IO + ATA_REG_DATA);
     }
     return 0;
 }
@@ -118,17 +104,14 @@ int ata_write_sectors(uint32_t lba, uint8_t count, const void *buf) {
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_LO,   (uint8_t)(lba & 0xFF));
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_MID,  (uint8_t)((lba >> 8) & 0xFF));
     outb(ATA_PRIMARY_IO + ATA_REG_LBA_HI,   (uint8_t)((lba >> 16) & 0xFF));
-    outb(ATA_PRIMARY_IO + ATA_REG_CMD, 0x30);   /* WRITE SECTORS */
+    outb(ATA_PRIMARY_IO + ATA_REG_CMD, 0x30);
     ata_io_wait();
 
     const uint16_t *p = (const uint16_t *)buf;
     for (int s = 0; s < count; s++) {
         if (ata_wait_ready(1) != 0) return -2;
-        for (int i = 0; i < 256; i++) {
-            uint16_t w = *p++;
-            outb(ATA_PRIMARY_IO + ATA_REG_DATA, (uint8_t)(w & 0xFF));
-            outb(ATA_PRIMARY_IO + ATA_REG_DATA, (uint8_t)(w >> 8));
-        }
+        for (int i = 0; i < 256; i++)
+            outw(ATA_PRIMARY_IO + ATA_REG_DATA, *p++);
     }
     return 0;
 }

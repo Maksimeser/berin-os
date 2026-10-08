@@ -9,7 +9,7 @@ CFLAGS  := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
            -mno-mmx -mno-avx -mno-80387 -mgeneral-regs-only \
            -Wall -Wextra -O2 \
            -nostdlib -nostartfiles -nodefaultlibs \
-           -Iarch/x86_64 -Idrivers -Ikernel -Imm -Iuserland
+           -Iarch/x86_64 -Idrivers -Ikernel -Imm -Iinclude -Iuserland
 ASFLAGS := -f elf64
 LDFLAGS := -m elf_x86_64 -T linker.ld -nostdlib
 
@@ -17,6 +17,7 @@ BUILD   := build
 KERNEL  := berin.bin
 
 C_SRCS   := kernel/kernel.c kernel/panic.c kernel/elf.c \
+            kernel/blockdev.c \
             arch/x86_64/gdt.c arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
             arch/x86_64/syscall.c \
             drivers/keyboard.c drivers/ata.c \

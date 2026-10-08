@@ -1,8 +1,10 @@
-/* Berin - kernel x86_64 (Stage 4)
+/* Berin - kernel x86_64
  * VGA + serial + ANSI + IDT + PIC + PIT + PS/2 keyboard + kerbash + panic
  */
 #include "heap.h"
 #include "pmm.h"
+#include "blockdev.h"
+#include "berfs.h"
 #include "ata.h"
 #include "gdt.h"
 #include "paging.h"
@@ -273,6 +275,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  uptime        ticks since boot\n");
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
+    term_write("  bread         read BerFS superblock from disk\n");
     term_write("  halt          halt CPU\n");
     term_write("  ata           ATA drive info\n");
     term_write("  atatest       ATA read/write test (sector 100)\n");
@@ -493,6 +496,31 @@ static int builtin_halt(int argc, char **argv) {
     return 42;
 }
 
+static int builtin_bread(int argc, char **argv) {
+    (void)argc; (void)argv;
+
+    static uint8_t buf[4096];
+    if (bdev_read(1, buf) != 0) {
+        term_write("[ FAIL ] bdev_read\n");
+        return 0;
+    }
+    struct berfs_superblock *sb = (struct berfs_superblock *)buf;
+
+    term_write("[ OK ] read block 1\n");
+    term_write("  magic:   0x"); put_hex64(sb->sb_magic); term_putchar('\n');
+    term_write("  version: ");   put_u64(sb->sb_version); term_putchar('\n');
+    term_write("  blocks:  ");   put_u64(sb->sb_total_blocks); term_putchar('\n');
+    term_write("  inodes:  ");   put_u64(sb->sb_total_inodes); term_putchar('\n');
+    term_write("  free blk:");   put_u64(sb->sb_free_blocks); term_putchar('\n');
+    term_write("  free ino:");   put_u64(sb->sb_free_inodes); term_putchar('\n');
+
+    if (sb->sb_magic == BERFS_MAGIC)
+        term_write("  BerFS: OK\n");
+    else
+        term_write("  BerFS: bad magic\n");
+    return 0;
+}
+
 static int builtin_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ INFO ] reboot: resetting\n");
@@ -582,6 +610,7 @@ static struct builtin builtins[] = {
     { "colors", builtin_colors },
     { "elf",    builtin_elf_test },
     { "uptime", builtin_uptime },
+    { "bread", builtin_bread },
     { "ata",     builtin_ata     },
     { "atatest", builtin_atatest },
     { "crash",  builtin_crash  },
@@ -680,6 +709,7 @@ void kernel_main(void) {
     term_clear();
 
     heap_init();
+    bdev_init();
     pmm_init();
     idt_init();
     pic_remap();
