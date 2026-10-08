@@ -84,7 +84,7 @@ int main(int argc, char **argv) {
     sb->sb_total_blocks       = total_blocks;
     sb->sb_total_inodes       = total_inodes;
     sb->sb_free_blocks        = total_blocks - layout.data_start_block;
-    sb->sb_free_inodes        = total_inodes - 1;   /* root inode takes one */
+    sb->sb_free_inodes        = total_inodes - 2;   /* inode 0 reserved + inode 1 root */
     sb->sb_root_inode         = BERFS_ROOT_INODE;
     sb->sb_inode_bitmap_block = 2;
     sb->sb_block_bitmap_block = 2 + layout.inode_bitmap_blocks;

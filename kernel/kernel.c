@@ -262,7 +262,7 @@ static int builtin_echo(int argc, char **argv) {
 
 static int builtin_help(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("kerbash 0.2 (x86_64) - builtins:\n");
+    term_write("kerbash 0.2 - builtins:\n");
     term_write("  echo <args>   print arguments\n");
     term_write("  help          this message\n");
     term_write("  clear         clear screen\n");
@@ -304,7 +304,7 @@ static int builtin_about(int argc, char **argv) {
 
 static int builtin_versi(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("Berin OS 0.0.2 \"Sorsha\" (x86_64)\n");
+    term_write("Berin OS 0.0.2 \"Sorsha\"\n");
     term_write("  kernel   0.0.2   x86_64, long mode\n");
     term_write("  kerbash  0.2     kernel shell\n");
     term_write("  serial   0.1     COM1 115200 8N1\n");
@@ -564,7 +564,7 @@ static int builtin_atatest(int argc, char **argv) {
 
 static int builtin_whoami(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("root\n");
+    term_write("kerbash root\n");
     return 0;
 }
 
@@ -599,7 +599,7 @@ static struct builtin builtins[] = {
 };
 
 static void print_prompt(void) {
-    term_write("\033[92mberin\033[93m:root\033[90m:~\033[92m# \033[0m");
+    term_write("\033[92mberin\033[90m:\033[93mkerbash\033[92m# \033[0m");
 }
 
 static void print_command_not_found(const char *name) {
@@ -689,7 +689,7 @@ void kernel_main(void) {
     pic_unmask(1);
     __asm__ __volatile__("sti");
 
-    term_write("Berin x86_64 loaded!\n");
+    term_write("Berin loaded!\n");
     term_write("Long mode: OK\n");
     term_write("\n");
     term_write(" /\\     /\\\n");
@@ -698,7 +698,7 @@ void kernel_main(void) {
     term_write(" \\   \x1F   /\n");
     term_write("  \\_____/\n");
     term_write("\n");
-    term_write("Berin OS v0.0.2 (x86_64)\n");
+    term_write("Berin OS v0.0.2\n");
     term_write("vendor: Turker Games\n");
     term_write("\n");
 
