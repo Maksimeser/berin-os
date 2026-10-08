@@ -16,8 +16,8 @@ LDFLAGS := -m elf_x86_64 -T linker.ld -nostdlib
 BUILD   := build
 KERNEL  := berin.bin
 
-C_SRCS   := kernel/kernel.c kernel/panic.c kernel/elf.c \
-            kernel/blockdev.c \
+C_SRCS   := kernel/kernel.c kernel/panic.c kernel/elf.c kernel/kstring.c \
+            kernel/blockdev.c kernel/kberfs.c \
             arch/x86_64/gdt.c arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
             arch/x86_64/syscall.c \
             drivers/keyboard.c drivers/ata.c \

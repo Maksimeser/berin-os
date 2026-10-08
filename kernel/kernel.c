@@ -4,7 +4,7 @@
 #include "heap.h"
 #include "pmm.h"
 #include "blockdev.h"
-#include "berfs.h"
+#include "kberfs.h"
 #include "ata.h"
 #include "gdt.h"
 #include "paging.h"
@@ -12,7 +12,6 @@
 #include <stddef.h>
 #include "idt.h"
 #include "elf.h"
-#include "hello_elf.h"
 #include "pic.h"
 #include "pit.h"
 #include "keyboard.h"
@@ -271,7 +270,9 @@ static int builtin_help(int argc, char **argv) {
     term_write("  about         about Berin OS\n");
     term_write("  versi         show versions\n");
     term_write("  colors        ANSI color demo\n");
-    term_write("  elf           load and run hello.elf (ELF64)\n");
+    term_write("  bls           list root directory\n");
+    term_write("  bcat <name>   print file contents\n");
+    term_write("  elf <name>    load ELF from disk and run\n");
     term_write("  uptime        ticks since boot\n");
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
@@ -416,28 +417,6 @@ static int builtin_kmtest(int argc, char **argv) {
 
 extern void enter_user_mode(uint64_t entry, uint64_t user_rsp);
 
-static int builtin_elf_test(int argc, char **argv) {
-    (void)argc; (void)argv;
-
-    void *stack = pmm_alloc_page();
-    if (!stack) { term_write("[elf] stack alloc failed\n"); return 0; }
-
-    uint64_t entry = 0;
-    if (elf_load(hello_elf, hello_elf_size, &entry) != 0) {
-        term_write("[elf] load failed\n");
-        return 0;
-    }
-
-    term_write("[elf] loaded, entry=0x"); put_hex64(entry); term_putchar('\n');
-    term_write("[elf] entering ring 3...\n");
-
-    uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
-    enter_user_mode(entry, user_rsp);
-
-    term_write("[elf] returned?!\n");
-    return 0;
-}
-
 static int builtin_meminfo(int argc, char **argv) {
     (void)argc; (void)argv;
     uint64_t total = pmm_total_pages();
@@ -518,6 +497,102 @@ static int builtin_bread(int argc, char **argv) {
         term_write("  BerFS: OK\n");
     else
         term_write("  BerFS: bad magic\n");
+    return 0;
+}
+
+static struct berfs_mount g_root;
+
+static int builtin_bls(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!g_root.mounted) { term_write("[ FAIL ] not mounted\n"); return 0; }
+
+    struct berfs_inode root;
+    if (berfs_read_inode(&g_root, BERFS_ROOT_INODE, &root) != 0) {
+        term_write("[ FAIL ] read root inode\n");
+        return 0;
+    }
+    term_write("root/\n");
+    uint32_t pos = 0, ino;
+    char name[BERFS_NAME_MAX + 1];
+    uint8_t type;
+    int r;
+    while ((r = berfs_dir_next(&g_root, &root, &pos, &ino, name, &type)) == 1) {
+        term_write(type == BERFS_DT_DIR ? "  d " : "  - ");
+        put_u64(ino); term_putchar(' ');
+        term_write(name); term_putchar('\n');
+    }
+    return 0;
+}
+
+static int builtin_bcat(int argc, char **argv) {
+    if (argc < 2) { term_write("usage: bcat <name>\n"); return 0; }
+    if (!g_root.mounted) { term_write("[ FAIL ] not mounted\n"); return 0; }
+
+    struct berfs_inode root;
+    berfs_read_inode(&g_root, BERFS_ROOT_INODE, &root);
+    uint32_t ino = berfs_dir_lookup(&g_root, &root, argv[1]);
+    if (ino == 0) {
+        term_write("\033[91mnot_found: "); term_write(argv[1]); term_write("\033[0m\n");
+        return 0;
+    }
+    struct berfs_inode fi;
+    if (berfs_read_inode(&g_root, ino, &fi) != 0) {
+        term_write("[ FAIL ] read inode\n"); return 0;
+    }
+    uint8_t buf[128];
+    uint32_t left = fi.i_size;
+    uint32_t pos = 0;
+    while (left > 0) {
+        uint32_t chunk = left > sizeof(buf) ? sizeof(buf) : left;
+        if (berfs_file_read(&g_root, &fi, pos, buf, chunk) != 0) {
+            term_write("[ FAIL ] read data\n"); return 0;
+        }
+        for (uint32_t i = 0; i < chunk; i++) term_putchar(buf[i]);
+        pos += chunk;
+        left -= chunk;
+    }
+    return 0;
+}
+
+static int builtin_elf(int argc, char **argv) {
+    if (argc < 2) { term_write("usage: elf <name>\n"); return 0; }
+    if (!g_root.mounted) { term_write("[ FAIL ] not mounted\n"); return 0; }
+
+    struct berfs_inode root;
+    berfs_read_inode(&g_root, BERFS_ROOT_INODE, &root);
+    uint32_t ino = berfs_dir_lookup(&g_root, &root, argv[1]);
+    if (ino == 0) {
+        term_write("\033[91mnot_found: "); term_write(argv[1]); term_write("\033[0m\n");
+        return 0;
+    }
+    struct berfs_inode fi;
+    if (berfs_read_inode(&g_root, ino, &fi) != 0) { term_write("[ FAIL ] inode\n"); return 0; }
+    if (fi.i_size == 0 || fi.i_size > 64*1024) {
+        term_write("[ FAIL ] file too big or empty\n"); return 0;
+    }
+
+    void *code = kmalloc(fi.i_size);
+    if (!code) { term_write("[ FAIL ] kmalloc\n"); return 0; }
+    if (berfs_file_read(&g_root, &fi, 0, code, fi.i_size) != 0) {
+        term_write("[ FAIL ] read\n"); kfree(code); return 0;
+    }
+
+    void *stack = pmm_alloc_page();
+    if (!stack) { term_write("[ FAIL ] stack\n"); kfree(code); return 0; }
+
+    uint64_t entry = 0;
+    if (elf_load(code, fi.i_size, &entry) != 0) {
+        term_write("[ FAIL ] elf_load\n"); kfree(code); return 0;
+    }
+
+    term_write("[ OK ] loaded from BerFS, entry=0x");
+    put_hex64(entry); term_putchar('\n');
+    term_write("[ elf ] entering ring 3...\n");
+
+    uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
+    enter_user_mode(entry, user_rsp);
+
+    term_write("[ elf ] returned?!\n");
     return 0;
 }
 
@@ -608,7 +683,9 @@ static struct builtin builtins[] = {
     { "about",  builtin_about  },
     { "versi",  builtin_versi  },
     { "colors", builtin_colors },
-    { "elf",    builtin_elf_test },
+    { "bls",   builtin_bls   },
+    { "bcat",  builtin_bcat  },
+    { "elf",   builtin_elf   },
     { "uptime", builtin_uptime },
     { "bread", builtin_bread },
     { "ata",     builtin_ata     },
@@ -710,6 +787,12 @@ void kernel_main(void) {
 
     heap_init();
     bdev_init();
+int mrc = berfs_mount_fs(&g_root);
+    if (mrc != 0) {
+        term_write("[ WARN ] berfs mount: ");
+        put_u64((uint64_t)mrc);
+        term_putchar('\n');
+    }
     pmm_init();
     idt_init();
     pic_remap();
