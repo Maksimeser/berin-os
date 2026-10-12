@@ -6,6 +6,7 @@
 #include "blockdev.h"
 #include "kberfs.h"
 #include "ata.h"
+#include "vfs.h"
 #include "gdt.h"
 #include "paging.h"
 #include <stdint.h>
@@ -505,19 +506,13 @@ static struct berfs_mount g_root;
 static int builtin_bls(int argc, char **argv) {
     (void)argc; (void)argv;
     if (!g_root.mounted) { term_write("[ FAIL ] not mounted\n"); return 0; }
-
-    struct berfs_inode root;
-    if (berfs_read_inode(&g_root, BERFS_ROOT_INODE, &root) != 0) {
-        term_write("[ FAIL ] read root inode\n");
-        return 0;
-    }
     term_write("root/\n");
     uint32_t pos = 0, ino;
     char name[BERFS_NAME_MAX + 1];
     uint8_t type;
     int r;
-    while ((r = berfs_dir_next(&g_root, &root, &pos, &ino, name, &type)) == 1) {
-        term_write(type == BERFS_DT_DIR ? "  d " : "  - ");
+    while ((r = vfs_listdir("/", &pos, name, &ino, &type)) == 1) {
+        term_write(type == VFS_DIR ? "  d " : "  - ");
         put_u64(ino); term_putchar(' ');
         term_write(name); term_putchar('\n');
     }
@@ -525,74 +520,58 @@ static int builtin_bls(int argc, char **argv) {
 }
 
 static int builtin_bcat(int argc, char **argv) {
-    if (argc < 2) { term_write("usage: bcat <name>\n"); return 0; }
-    if (!g_root.mounted) { term_write("[ FAIL ] not mounted\n"); return 0; }
-
-    struct berfs_inode root;
-    berfs_read_inode(&g_root, BERFS_ROOT_INODE, &root);
-    uint32_t ino = berfs_dir_lookup(&g_root, &root, argv[1]);
-    if (ino == 0) {
+    if (argc < 2) { term_write("usage: bcat <path>\n"); return 0; }
+    int fd = vfs_open(argv[1], O_RDONLY);
+    if (fd < 0) {
         term_write("\033[91mnot_found: "); term_write(argv[1]); term_write("\033[0m\n");
         return 0;
     }
-    struct berfs_inode fi;
-    if (berfs_read_inode(&g_root, ino, &fi) != 0) {
-        term_write("[ FAIL ] read inode\n"); return 0;
+    char buf[128];
+    int n;
+    while ((n = vfs_read(fd, buf, sizeof(buf))) > 0) {
+        for (int i = 0; i < n; i++) term_putchar(buf[i]);
     }
-    uint8_t buf[128];
-    uint32_t left = fi.i_size;
-    uint32_t pos = 0;
-    while (left > 0) {
-        uint32_t chunk = left > sizeof(buf) ? sizeof(buf) : left;
-        if (berfs_file_read(&g_root, &fi, pos, buf, chunk) != 0) {
-            term_write("[ FAIL ] read data\n"); return 0;
-        }
-        for (uint32_t i = 0; i < chunk; i++) term_putchar(buf[i]);
-        pos += chunk;
-        left -= chunk;
-    }
+    vfs_close(fd);
     return 0;
 }
 
 static int builtin_elf(int argc, char **argv) {
-    if (argc < 2) { term_write("usage: elf <name>\n"); return 0; }
-    if (!g_root.mounted) { term_write("[ FAIL ] not mounted\n"); return 0; }
+    if (argc < 2) { term_write("usage: elf <path>\n"); return 0; }
 
-    struct berfs_inode root;
-    berfs_read_inode(&g_root, BERFS_ROOT_INODE, &root);
-    uint32_t ino = berfs_dir_lookup(&g_root, &root, argv[1]);
-    if (ino == 0) {
+    uint32_t size;
+    uint8_t  type;
+    if (vfs_stat(argv[1], &size, &type) != 0) {
         term_write("\033[91mnot_found: "); term_write(argv[1]); term_write("\033[0m\n");
         return 0;
     }
-    struct berfs_inode fi;
-    if (berfs_read_inode(&g_root, ino, &fi) != 0) { term_write("[ FAIL ] inode\n"); return 0; }
-    if (fi.i_size == 0 || fi.i_size > 64*1024) {
-        term_write("[ FAIL ] file too big or empty\n"); return 0;
+    if (type != VFS_FILE || size == 0 || size > 64*1024) {
+        term_write("[ FAIL ] bad file\n"); return 0;
     }
 
-    void *code = kmalloc(fi.i_size);
+    void *code = kmalloc(size);
     if (!code) { term_write("[ FAIL ] kmalloc\n"); return 0; }
-    if (berfs_file_read(&g_root, &fi, 0, code, fi.i_size) != 0) {
-        term_write("[ FAIL ] read\n"); kfree(code); return 0;
+
+    int fd = vfs_open(argv[1], O_RDONLY);
+    if (fd < 0) { kfree(code); term_write("[ FAIL ] open\n"); return 0; }
+    if (vfs_read(fd, code, size) != (int)size) {
+        vfs_close(fd); kfree(code); term_write("[ FAIL ] read\n"); return 0;
     }
+    vfs_close(fd);
 
     void *stack = pmm_alloc_page();
-    if (!stack) { term_write("[ FAIL ] stack\n"); kfree(code); return 0; }
+    if (!stack) { kfree(code); term_write("[ FAIL ] stack\n"); return 0; }
 
     uint64_t entry = 0;
-    if (elf_load(code, fi.i_size, &entry) != 0) {
-        term_write("[ FAIL ] elf_load\n"); kfree(code); return 0;
+    if (elf_load(code, size, &entry) != 0) {
+        kfree(code); term_write("[ FAIL ] elf_load\n"); return 0;
     }
 
-    term_write("[ OK ] loaded from BerFS, entry=0x");
+    term_write("[ OK ] loaded from VFS, entry=0x");
     put_hex64(entry); term_putchar('\n');
     term_write("[ elf ] entering ring 3...\n");
 
     uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
     enter_user_mode(entry, user_rsp);
-
-    term_write("[ elf ] returned?!\n");
     return 0;
 }
 
@@ -786,6 +765,7 @@ void kernel_main(void) {
     term_clear();
 
     heap_init();
+    vfs_init();
     bdev_init();
 int mrc = berfs_mount_fs(&g_root);
     if (mrc != 0) {
@@ -793,6 +773,11 @@ int mrc = berfs_mount_fs(&g_root);
         put_u64((uint64_t)mrc);
         term_putchar('\n');
     }
+    if (mrc == 0) {
+        vfs_init();
+        vfs_mount_berfs(&g_root);
+    }
+
     pmm_init();
     idt_init();
     pic_remap();
