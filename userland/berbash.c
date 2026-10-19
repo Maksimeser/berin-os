@@ -27,7 +27,11 @@ static int builtin_echo(int argc, char **argv) {
 }
 
 static int builtin_help(int argc, char **argv) {
-    (void)argc; (void)argv;
+    if (argc >= 2 && str_eq(argv[1], "d-")) {
+        puts("berbash 0.1 - debug/destructive:\n");
+        puts("  crash          trigger divide error (halts system)\n");
+        return 0;
+    }
     puts("berbash 0.1 (userland) - builtins:\n");
     puts("  echo <args>    print arguments\n");
     puts("  help           this message\n");
@@ -36,6 +40,7 @@ static int builtin_help(int argc, char **argv) {
     puts("  versi          versions\n");
     puts("  ls [path]      list directory\n");
     puts("  cat <path>     print file\n");
+    puts("  \033[90m(for debug tools type 'help d-')\033[0m\n");
     return 0;
 }
 
@@ -103,6 +108,17 @@ struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
 };
+
+static int builtin_crash(int argc, char **argv) {
+    (void)argc; (void)argv;
+    puts("[user] triggering divide error from ring 3...\n");
+    __asm__ __volatile__(
+        "movq $0, %%rax\n\t"
+        "divq %%rax\n\t"
+        : : : "rax", "rdx");
+    return 0;
+}
+
 static struct builtin builtins[] = {
     { "echo",   builtin_echo   },
     { "help",   builtin_help   },
@@ -111,6 +127,7 @@ static struct builtin builtins[] = {
     { "versi",  builtin_versi  },
     { "ls",     builtin_ls     },
     { "cat",    builtin_cat    },
+    { "crash",  builtin_crash  },
     { 0, 0 },
 };
 
@@ -128,6 +145,11 @@ static int tokenize(char *s, char **argv, int max) {
 
 static void line_edit(void) {
     long n = read(0, line_buf, MAX_LINE - 1);
+    if (n == -2) {
+        puts("^C\n");
+        line_len = 0;
+        return;
+    }
     if (n < 0) n = 0;
     if (n == 1 && line_buf[0] == 3) {
         puts("^C\n");

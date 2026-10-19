@@ -266,6 +266,16 @@ static int builtin_echo(int argc, char **argv) {
 
 static int builtin_help(int argc, char **argv) {
     (void)argc; (void)argv;
+    if (argc >= 2 && str_eq(argv[1], "d-")) {
+        term_write("kerbash 0.2 - debug/destructive:\n");
+        term_write("  crash         trigger divide error\n");
+        term_write("  pf            trigger page fault\n");
+        term_write("  halt          halt CPU\n");
+        term_write("  kmtest        kmalloc/kfree round-trip\n");
+        term_write("  atatest       ATA read/write test (sector 100)\n");
+        term_write("  memtest       alloc 3 pages, free, verify\n");
+        return 0;
+    }
     term_write("kerbash 0.2 - builtins:\n");
     term_write("  echo <args>   print arguments\n");
     term_write("  help          this message\n");
@@ -780,7 +790,6 @@ int mrc = berfs_mount_fs(&g_root);
         term_putchar('\n');
     }
     if (mrc == 0) {
-        vfs_init();
         vfs_mount_berfs(&g_root);
     }
 

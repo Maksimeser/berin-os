@@ -39,6 +39,9 @@ static uint64_t sys_read(uint64_t fd, void *buf, uint64_t len) {
         uint64_t n = 0;
         while (n < len) {
             char c = berin_input_getchar();
+            if (c == 3) {
+                return (uint64_t)-2;
+            }
             if (c == '\r' || c == '\n') {
                 term_putchar('\n');
                 p[n++] = '\n';
