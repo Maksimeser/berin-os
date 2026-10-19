@@ -284,6 +284,19 @@ struct builtin {
     int (*fn)(int argc, char **argv);
 };
 
+static int builtin_rm(int argc, char **argv) {
+    if (argc < 2) { puts("usage: rm <path>\n"); return 0; }
+    char abs_path[256];
+    make_abs(argv[1], abs_path);
+
+    // syscall 87 = unlink
+    long r = _syscall6(87, (long)abs_path, 0, 0, 0, 0);
+    if (r < 0) {
+        printf("\033[91mnot_found: %s\033[0m\n", argv[1]);
+    }
+    return 0;
+}
+
 static int builtin_touch(int argc, char **argv) {
     if (argc < 2) { puts("usage: touch <path>\n"); return 0; }
     char abs_path[256];
@@ -315,6 +328,7 @@ static struct builtin builtins[] = {
     { "pwd",    builtin_pwd    },
     { "cd",     builtin_cd     },
     { "cat",    builtin_cat    },
+    { "rm",     builtin_rm     },
     { "stat",   builtin_stat   },
     { "head",   builtin_head   },
     { "tail",   builtin_tail   },

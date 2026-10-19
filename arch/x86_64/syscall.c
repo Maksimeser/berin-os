@@ -113,7 +113,12 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 exit_to_kernel(code);   /* никогда не возвращается */
                                 return 0;
                             }
+                            extern int vfs_unlink(const char *path);
 
+                            static uint64_t sys_unlink(const char *path) {
+                                if (!path) return (uint64_t)-1;
+                                return (uint64_t)vfs_unlink(path);
+                            }
                             void syscall_dispatch(struct regs *r) {
                                 uint64_t nr  = r->rax;
                                 uint64_t a1  = r->rdi;
@@ -122,6 +127,7 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 uint64_t ret = (uint64_t)-1;
 
                                 switch (nr) {
+                                    case 87:          ret = sys_unlink((const char *)a1);        break;
                                     case SYS_WRITE:   ret = sys_write(a1, (const char *)a2, a3); break;
                                     case SYS_OPEN:    ret = sys_open((const char *)a1, a2);      break;
                                     case SYS_READ:    ret = sys_read(a1, (void *)a2, a3);        break;

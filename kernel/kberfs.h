@@ -22,5 +22,9 @@ uint32_t berfs_alloc_block(struct berfs_mount *m);
 uint32_t berfs_alloc_inode(struct berfs_mount *m);
 int  berfs_dir_add(struct berfs_mount *m, struct berfs_inode *dir_inode,
                    uint32_t dir_ino, const char *name, uint32_t ino, uint8_t type);
+int berfs_free_block(struct berfs_mount *m, uint32_t blk);
+int berfs_free_inode(struct berfs_mount *m, uint32_t ino);
+int berfs_dir_remove(struct berfs_mount *m, struct berfs_inode *dir_inode,
+                     uint32_t dir_ino, const char *name);
 
 #endif

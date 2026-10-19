@@ -253,3 +253,35 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                                         int vfs_mount_berfs(struct berfs_mount *bm) {
                                                             return vfs_mount_add("/", BERFS_ROOT_INODE, &berfs_ops, bm);
                                                         }
+                                                        int vfs_unlink(const char *path) {
+                                                            struct vfs_mount *m;
+                                                            uint32_t ino;
+                                                            if (vfs_resolve(path, &m, &ino) != 0) return -1;
+
+                                                            const char *rel;
+                                                            m = find_mount(path, &rel);
+                                                            if (!m) return -1;
+                                                            while (*rel == '/') rel++;
+                                                            if (!*rel) return -1;
+
+                                                            struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
+                                                            struct berfs_inode root;
+                                                            if (berfs_read_inode(bm, BERFS_ROOT_INODE, &root) != 0) return -1;
+
+                                                            // Удаляем запись из каталога
+                                                            if (berfs_dir_remove(bm, &root, BERFS_ROOT_INODE, rel) != 0) return -2;
+
+                                                            // Освобождаем блоки и inode
+                                                            struct berfs_inode in;
+                                                            if (berfs_read_inode(bm, ino, &in) == 0) {
+                                                                for (int i = 0; i < BERFS_DIRECT_BLOCKS; i++) {
+                                                                    if (in.i_block[i] != 0) {
+                                                                        berfs_free_block(bm, in.i_block[i]);
+                                                                        in.i_block[i] = 0;
+                                                                    }
+                                                                }
+                                                            }
+                                                            berfs_free_inode(bm, ino);
+
+                                                            return 0;
+                                                        }
