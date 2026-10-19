@@ -419,7 +419,7 @@ static struct builtin builtins[] = {
     { "wheiam", builtin_wheiam },
     { "cat",    builtin_cat    },
     { "reboot", builtin_reboot },
-//  { "run",    builtin_run    },
+  //  { "run",    builtin_run    },
     { "logoff", builtin_logoff },
     { "rm",     builtin_rm     },
     { "stat",   builtin_stat   },

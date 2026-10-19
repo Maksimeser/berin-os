@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include "idt.h"
 #include "elf.h"
+#include "vmm.h"
 #include "pic.h"
 #include "pit.h"
 #include "keyboard.h"
@@ -300,6 +301,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  bls           list root directory\n");
     term_write("  bcat <name>   print file contents\n");
     term_write("  elf <name>    load ELF from disk and run\n");
+    term_write("  vmtest        test VMM (create PML4, map page)\n");
     term_write("  uptime        ticks since boot\n");
     term_write("  crash         trigger divide error\n");
     term_write("  pf            trigger page fault\n");
@@ -588,7 +590,7 @@ static int builtin_elf(int argc, char **argv) {
     if (!stack) { kfree(code); term_write("[ FAIL ] stack\n"); return 0; }
 
     uint64_t entry = 0;
-    if (elf_load(code, size, &entry) != 0) {
+    if (elf_load(code, size, (uint64_t *)paging_get_cr3(), &entry) != 0) {
         kfree(code); term_write("[ FAIL ] elf_load\n"); return 0;
     }
 
@@ -602,6 +604,37 @@ static int builtin_elf(int argc, char **argv) {
     term_write("[elf] user returned, code=");
     put_u64(rc);
     term_putchar('\n');
+    return 0;
+}
+
+static int builtin_vmtest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("[ vmm ] creating new PML4...\n");
+    uint64_t *new_cr3 = vmm_create_pml4();
+    if (!new_cr3) {
+        term_write("[ FAIL ] pmm_alloc_page\n");
+        return 0;
+    }
+
+    term_write("  new CR3: 0x"); put_hex64((uint64_t)new_cr3); term_putchar('\n');
+
+    uint64_t phys = vmm_get_phys(new_cr3, 0x100000);
+    term_write("  virt 0x100000 -> phys 0x"); put_hex64(phys); term_putchar('\n');
+
+    term_write("[ vmm ] mapping user page at 0x400000...\n");
+    void *user_phys = pmm_alloc_page();
+    if (!user_phys) { term_write("  [FAIL] alloc\n"); return 0; }
+
+    vmm_map_page(new_cr3, 0x400000, (uint64_t)user_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+
+    uint64_t user_phys2 = vmm_get_phys(new_cr3, 0x400000);
+    term_write("  virt 0x400000 -> phys 0x"); put_hex64(user_phys2); term_putchar('\n');
+
+    if (user_phys2 == (uint64_t)user_phys) {
+        term_write("[ OK ] VMM works!\n");
+    } else {
+        term_write("[ FAIL ] mapping mismatch\n");
+    }
     return 0;
 }
 
@@ -693,6 +726,7 @@ static struct builtin builtins[] = {
     { "versi",  builtin_versi  },
     { "colors", builtin_colors },
     { "bls",   builtin_bls   },
+    { "vmtest", builtin_vmtest },
     { "bcat",  builtin_bcat  },
     { "elf",   builtin_elf   },
     { "uptime", builtin_uptime },

@@ -1,55 +1,51 @@
-/* Berin - ELF64 loader (Stage 6.1, minimal) */
+/* Berin - ELF64 loader (with VMM support) */
 
 #include "elf.h"
+#include "vmm.h"
+#include "pmm.h"
+#include "kstring.h"
 
-extern void term_write(const char *s);
-
-/* returns 0 on success */
-int elf_load(const uint8_t *data, uint64_t size, uint64_t *entry_out) {
-    if (size < sizeof(struct elf64_ehdr)) {
-        term_write("[elf] file too small\n");
-        return -1;
-    }
+int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry_out) {
+    if (size < sizeof(struct elf64_ehdr)) return -1;
 
     const struct elf64_ehdr *eh = (const struct elf64_ehdr *)data;
 
-    if (*(const uint32_t *)eh->e_ident != ELF_MAGIC) {
-        term_write("[elf] bad magic\n");
-        return -1;
-    }
-    if (eh->e_ident[4] != ELFCLASS64) {
-        term_write("[elf] not ELF64\n");
-        return -1;
-    }
-    if (eh->e_ident[5] != ELFDATA2LSB) {
-        term_write("[elf] not little-endian\n");
-        return -1;
-    }
-    if (eh->e_type != ET_EXEC) {
-        term_write("[elf] not ET_EXEC\n");
-        return -1;
-    }
-    if (eh->e_machine != EM_X86_64) {
-        term_write("[elf] not x86_64\n");
-        return -1;
-    }
+    if (*(const uint32_t *)eh->e_ident != ELF_MAGIC) return -1;
+    if (eh->e_ident[4] != ELFCLASS64) return -1;
+    if (eh->e_ident[5] != ELFDATA2LSB) return -1;
+    if (eh->e_type != ET_EXEC) return -1;
+    if (eh->e_machine != EM_X86_64) return -1;
 
-    /* iterate program headers */
     for (uint16_t i = 0; i < eh->e_phnum; i++) {
-        const struct elf64_phdr *ph = (const struct elf64_phdr *)
-        (data + eh->e_phoff + (uint64_t)i * eh->e_phentsize);
-
+        const struct elf64_phdr *ph = (const struct elf64_phdr *)(data + eh->e_phoff + (uint64_t)i * eh->e_phentsize);
         if (ph->p_type != PT_LOAD) continue;
-        if (ph->p_filesz > ph->p_memsz) {
-            term_write("[elf] filesz > memsz\n");
-            return -1;
+        if (ph->p_filesz > ph->p_memsz) return -1;
+
+        uint64_t vaddr_start = ph->p_vaddr;
+        uint64_t vaddr_end = ph->p_vaddr + ph->p_memsz;
+
+        for (uint64_t vaddr = vaddr_start & ~0xFFFULL; vaddr < vaddr_end; vaddr += 4096) {
+            uint64_t phys = vmm_get_phys(pml4, vaddr);
+            if (phys == 0) {
+                void *new_page = pmm_alloc_page();
+                if (!new_page) return -1;
+                memset(new_page, 0, 4096);
+                vmm_map_page(pml4, vaddr, (uint64_t)new_page, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+                phys = (uint64_t)new_page;
+            }
+
+            uint64_t page_start = vaddr;
+            uint64_t page_end = vaddr + 4096;
+            uint64_t copy_start = page_start > ph->p_vaddr ? page_start : ph->p_vaddr;
+            uint64_t copy_end = page_end < (ph->p_vaddr + ph->p_filesz) ? page_end : (ph->p_vaddr + ph->p_filesz);
+
+            if (copy_start < copy_end) {
+                uint64_t len = copy_end - copy_start;
+                uint64_t file_offset = ph->p_offset + (copy_start - ph->p_vaddr);
+                uint64_t phys_dst = phys + (copy_start - page_start);
+                memcpy((void *)phys_dst, data + file_offset, len);
+            }
         }
-
-        uint8_t *dst       = (uint8_t *)ph->p_vaddr;
-        const uint8_t *src = data + ph->p_offset;
-
-        for (uint64_t k = 0; k < ph->p_filesz; k++) dst[k] = src[k];
-        for (uint64_t k = ph->p_filesz; k < ph->p_memsz; k++) dst[k] = 0;
     }
 
     *entry_out = eh->e_entry;

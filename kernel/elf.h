@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define ELF_MAGIC     0x464C457FUL   /* "\x7fELF" as little-endian u32 */
+#define ELF_MAGIC     0x464C457FUL
 #define ELFCLASS64    2
 #define ELFDATA2LSB   1
 #define ET_EXEC       2
@@ -39,6 +39,6 @@ struct elf64_phdr {
 } __attribute__((packed));
 
 /* returns 0 on success, -1 on error */
-int elf_load(const uint8_t *data, uint64_t size, uint64_t *entry_out);
+int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry_out);
 
 #endif

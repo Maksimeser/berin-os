@@ -1,12 +1,13 @@
 /* Berin - syscall dispatcher (int 0x80)
  * ABI: rax=number, rdi/rsi/rdx/r10 = args, return in rax
  */
-
 #include "syscall.h"
 #include "vfs.h"
 #include "heap.h"
 #include "pmm.h"
 #include "sched.h"
+#include "vmm.h"
+#include "paging.h"
 #include "vfs.h"
 #include "elf.h"
 #include "keyboard.h"
@@ -155,18 +156,25 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 vfs_read(fd, code, size);
                                 vfs_close(fd);
 
+                                uint64_t *new_pml4 = vmm_create_pml4();
+                                if (!new_pml4) { kfree(code); return (uint64_t)-1; }
+
                                 uint64_t entry = 0;
-                                if (elf_load(code, size, &entry) != 0) {
+                                if (elf_load(code, size, new_pml4, &entry) != 0) {
                                     kfree(code);
                                     return (uint64_t)-1;
                                 }
                                 kfree(code);
 
-                                /* Выделяем новый стек для execve */
-                                uint64_t new_stack = (uint64_t)pmm_alloc_page() + 4096 - 16;
+                                void *stack_phys = pmm_alloc_page();
+                                uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
+                                vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+
+                                vmm_switch_pml4(new_pml4);
 
                                 r->rip = entry;
-                                r->rsp = new_stack;
+                                r->rsp = user_stack_vaddr + 4096 - 16;
+
                                 return 0;
                             }
 
@@ -185,6 +193,7 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
 
                             extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
 
+                            extern uint64_t kernel_rsp_saved;
                             static uint64_t sys_spawn(const char *path) {
                                 if (!path) return (uint64_t)-1;
 
@@ -199,25 +208,29 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 vfs_read(fd, code, size);
                                 vfs_close(fd);
 
+                                uint64_t *new_pml4 = vmm_create_pml4();
+                                if (!new_pml4) { kfree(code); return (uint64_t)-1; }
+
                                 uint64_t entry = 0;
-                                if (elf_load(code, size, &entry) != 0) {
+                                if (elf_load(code, size, new_pml4, &entry) != 0) {
                                     kfree(code);
                                     return (uint64_t)-1;
                                 }
                                 kfree(code);
 
-                                void *stack = pmm_alloc_page();
-                                if (!stack) return (uint64_t)-1;
+                                void *stack_phys = pmm_alloc_page();
+                                uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
+                                vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
 
-                                uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
+                                uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
 
-                                /* СОХРАНЯЕМ СТЕК ЯДРА! */
+                                uint64_t old_cr3 = paging_get_cr3();
                                 uint64_t saved_rsp = kernel_rsp_saved;
 
-                                /* Запускаем процесс */
+                                vmm_switch_pml4(new_pml4);
                                 uint64_t rc = enter_user_mode(entry, user_rsp);
 
-                                /* ВОССТАНАВЛИВАЕМ СТЕК ЯДРА! */
+                                vmm_switch_pml4((uint64_t *)old_cr3);
                                 kernel_rsp_saved = saved_rsp;
 
                                 return rc;
