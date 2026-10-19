@@ -1,5 +1,4 @@
 # Berin OS - Makefile (x86_64, Stage 1)
-
 CC      := gcc
 AS      := nasm
 LD      := ld
@@ -21,8 +20,8 @@ C_SRCS   := kernel/kernel.c kernel/panic.c kernel/elf.c kernel/kstring.c \
             arch/x86_64/gdt.c arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c \
             arch/x86_64/syscall.c \
             drivers/keyboard.c drivers/ata.c \
-            mm/pmm.c mm/paging.c mm/heap.c
-ASM_SRCS := boot/boot.asm arch/x86_64/isr_stubs.asm
+            mm/pmm.c mm/paging.c mm/heap.c kernel/sched.c
+ASM_SRCS := boot/boot.asm arch/x86_64/isr_stubs.asm arch/x86_64/switch.asm
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
@@ -45,7 +44,12 @@ $(BUILD)/%.o: %.asm
 
 run: $(KERNEL)
 	qemu-system-x86_64 -kernel $(KERNEL) -m 128M -serial stdio \
-	    -drive file=disk.img,format=raw,if=ide \
+	    -drive file=disk.img,format=raw,if=ide,cache=writethrough \
+	    -no-reboot
+
+debug: $(KERNEL)
+	qemu-system-x86_64 -kernel $(KERNEL) -m 128M -serial stdio \
+	    -drive file=disk.img,format=raw,if=ide,cache=writethrough \
 	    -no-reboot -d int -D qemu.log
 
 clean:

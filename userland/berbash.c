@@ -7,6 +7,7 @@
 #define MAX_ARGS 16
 
 static char cwd[256] = "/";
+static char home[256] = "/";
 
 static void make_abs(const char *path, char *out) {
     if (path[0] == '/') {
@@ -28,7 +29,9 @@ static int  line_len;
 static int str_eq(const char *a, const char *b) { return strcmp(a, b) == 0; }
 
 static void print_prompt(void) {
-    puts("\033[92mberin\033[90m:\033[93mberbash\033[92m$ \033[0m");
+    puts("\033[90m[\033[93m!admin\033[90m@\033[92mberin\033[90m \033[94m");
+    puts(cwd);
+    puts("\033[90m]\033[97m# \033[0m");
 }
 
 /* ------- builtins ------- */
@@ -76,9 +79,11 @@ static int builtin_help(int argc, char **argv) {
     puts("  whoami         current user\n");
     puts("  clear          clear screen\n");
     puts("  reboot         reboot machine\n");
+    puts("  wheiam         detailed info (user, cwd, uid)\n");
     puts("  logoff         shut down (ACPI)\n");
     puts("  mkdir <path>   create directory\n");
     puts("  touch <path>   create empty file\n");
+    puts("  run <path>     run program in child process\n");
     puts("  versi          versions\n");
     puts("  stat <path>    file info (size, type)\n");
     puts("  head [n- N] <f>print first N lines (default 10)\n");
@@ -158,10 +163,25 @@ static int builtin_pwd(int argc, char **argv) {
 }
 
 static int builtin_cd(int argc, char **argv) {
-    if (argc < 2) { puts("usage: cd <path>\n"); return 0; }
-    const char *path = argv[1];
+    const char *path;
+    if (argc < 2) {
+        path = home;
+    } else {
+        path = argv[1];
+    }
+
+    if (str_eq(path, "..")) {
+        int len = 0;
+        while (cwd[len]) len++;
+        if (len <= 1) { cwd[0] = '/'; cwd[1] = '\0'; return 0; }
+        while (len > 0 && cwd[len - 1] != '/') len--;
+        if (len <= 1) { cwd[0] = '/'; cwd[1] = '\0'; }
+        else { cwd[len - 1] = '\0'; }
+        return 0;
+    }
 
     char new_abs[256];
+    make_abs(path, new_abs);
 
     if (str_eq(path, "..")) {
         int len = 0;
@@ -289,8 +309,10 @@ static int builtin_mkdir(int argc, char **argv) {
     make_abs(argv[1], abs_path);
 
     long r = mkdir(abs_path, 0755);
-    if (r < 0) {
+    if (r == -2) {
         printf("\033[91malready_exists: %s\033[0m\n", argv[1]);
+    } else if (r < 0) {
+        printf("\033[91mnot_found (parent dir?): %s\033[0m\n", argv[1]);
     }
     return 0;
 }
@@ -301,10 +323,37 @@ static int builtin_clear(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_wheiam(int argc, char **argv) {
+    (void)argc; (void)argv;
+    puts("user:   root\n");
+    puts("uid:    0\n");
+    puts("gid:    0\n");
+    puts("home:   /\n");
+    puts("home:   "); puts(home); puts("\n");
+    puts("cwd:    "); puts(cwd); puts("\n");
+    puts("shell:  /bin/berbash\n");
+    puts("vendor: Turker Games\n");
+    return 0;
+}
+
 struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
 };
+
+static int builtin_run(int argc, char **argv) {
+    if (argc < 2) { puts("usage: run <path>\n"); return 0; }
+    char abs_path[256];
+    make_abs(argv[1], abs_path);
+
+    long r = spawn(abs_path);
+    if (r < 0) {
+        printf("\033[91mnot_found: %s\033[0m\n", argv[1]);
+    } else {
+        printf("[berbash] process exited with code %d\n", (int)r);
+    }
+    return 0;
+}
 
 static int builtin_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
@@ -338,8 +387,11 @@ static int builtin_touch(int argc, char **argv) {
     char abs_path[256];
     make_abs(argv[1], abs_path);
     int fd = open(abs_path, O_RDWR | O_CREAT);
-    if (fd < 0) printf("\033[91mnot_found: %s\033[0m\n", argv[1]);
-    else close(fd);
+    if (fd < 0) {
+        printf("\033[91mnot_found (parent dir?): %s\033[0m\n", argv[1]);
+    } else {
+        close(fd);
+    }
     return 0;
 }
 
@@ -364,8 +416,10 @@ static struct builtin builtins[] = {
     { "pwd",    builtin_pwd    },
     { "cd",     builtin_cd     },
     { "mkdir",  builtin_mkdir  },
+    { "wheiam", builtin_wheiam },
     { "cat",    builtin_cat    },
     { "reboot", builtin_reboot },
+//  { "run",    builtin_run    },
     { "logoff", builtin_logoff },
     { "rm",     builtin_rm     },
     { "stat",   builtin_stat   },

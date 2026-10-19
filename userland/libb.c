@@ -124,3 +124,18 @@ void printf(const char *fmt, ...) {
 long mkdir(const char *path, int mode) {
     return _syscall6(SYS_MKDIR, (long)path, mode, 0, 0, 0);
 }
+long fork(void) {
+    return _syscall6(SYS_FORK, 0, 0, 0, 0, 0);
+}
+
+long execve(const char *path, char *const argv[], char *const envp[]) {
+    (void)argv; (void)envp; /* Пока игнорируем */
+    return _syscall6(SYS_EXECVE, (long)path, 0, 0, 0, 0);
+}
+
+long wait(int pid) {
+    return _syscall6(SYS_WAIT, pid, 0, 0, 0, 0);
+}
+long spawn(const char *path) {
+    return _syscall6(SYS_SPAWN, (long)path, 0, 0, 0, 0);
+}

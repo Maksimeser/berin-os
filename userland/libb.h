@@ -19,7 +19,15 @@
 #define O_CREAT  0x04
 #define O_TRUNC  0x08
 #define SYS_MKDIR    83
+#define SYS_FORK   57
+#define SYS_EXECVE 59
+#define SYS_WAIT   61
+#define SYS_SPAWN  200
 
+long spawn(const char *path);
+long fork(void);
+long execve(const char *path, char *const argv[], char *const envp[]);
+long wait(int pid);
 long mkdir(const char *path, int mode);
 
 struct stat_buf {

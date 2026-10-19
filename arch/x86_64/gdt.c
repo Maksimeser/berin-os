@@ -23,7 +23,7 @@ static uint64_t gdt[7];
 static struct gdt_ptr gp;
 static struct tss64    tss;
 
-static uint8_t kstack[8192] __attribute__((aligned(16)));
+static uint8_t kstack[65536] __attribute__((aligned(16)));
 
 void tss_set_rsp0(uint64_t rsp0) {
     tss.rsp0 = rsp0;

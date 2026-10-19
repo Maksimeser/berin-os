@@ -4,11 +4,17 @@
 
 #include "syscall.h"
 #include "vfs.h"
+#include "heap.h"
+#include "pmm.h"
+#include "sched.h"
+#include "vfs.h"
+#include "elf.h"
 #include "keyboard.h"
 
 extern char berin_input_getchar(void);
 extern void term_write(const char *s);
 extern void term_putchar(char c);
+extern uint64_t kernel_rsp_saved;
 
 static void put_u64(uint64_t v) {
     char r[24]; int ri = 0;
@@ -135,6 +141,88 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 return (uint64_t)vfs_mkdir(path);
                             }
 
+                            static uint64_t sys_fork_entry(struct regs *r) {
+                                return (uint64_t)sys_fork(r);
+                            }
+
+                            static uint64_t sys_execve_entry(struct regs *r, const char *path) {
+                                uint32_t size; uint8_t type;
+                                if (vfs_stat(path, &size, &type) != 0) return (uint64_t)-1;
+
+                                void *code = kmalloc(size);
+                                int fd = vfs_open(path, O_RDONLY);
+                                if (fd < 0) return (uint64_t)-1;
+                                vfs_read(fd, code, size);
+                                vfs_close(fd);
+
+                                uint64_t entry = 0;
+                                if (elf_load(code, size, &entry) != 0) {
+                                    kfree(code);
+                                    return (uint64_t)-1;
+                                }
+                                kfree(code);
+
+                                /* Выделяем новый стек для execve */
+                                uint64_t new_stack = (uint64_t)pmm_alloc_page() + 4096 - 16;
+
+                                r->rip = entry;
+                                r->rsp = new_stack;
+                                return 0;
+                            }
+
+                            static uint64_t sys_wait_entry(uint64_t pid) {
+                                /* Просто ждем, пока процесс не станет зомби */
+                                while (1) {
+                                    struct task *t = current_task->next; /* Ищем по списку */
+                                    while (t) {
+                                        if (t->pid == (int)pid && t->state == 2) return 0;
+                                        t = t->next;
+                                    }
+                                    schedule(); /* Переключаемся, если еще не готов */
+                                }
+                                return 0;
+                            }
+
+                            extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
+
+                            static uint64_t sys_spawn(const char *path) {
+                                if (!path) return (uint64_t)-1;
+
+                                uint32_t size; uint8_t type;
+                                if (vfs_stat(path, &size, &type) != 0) return (uint64_t)-1;
+
+                                void *code = kmalloc(size);
+                                if (!code) return (uint64_t)-1;
+
+                                int fd = vfs_open(path, O_RDONLY);
+                                if (fd < 0) { kfree(code); return (uint64_t)-1; }
+                                vfs_read(fd, code, size);
+                                vfs_close(fd);
+
+                                uint64_t entry = 0;
+                                if (elf_load(code, size, &entry) != 0) {
+                                    kfree(code);
+                                    return (uint64_t)-1;
+                                }
+                                kfree(code);
+
+                                void *stack = pmm_alloc_page();
+                                if (!stack) return (uint64_t)-1;
+
+                                uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
+
+                                /* СОХРАНЯЕМ СТЕК ЯДРА! */
+                                uint64_t saved_rsp = kernel_rsp_saved;
+
+                                /* Запускаем процесс */
+                                uint64_t rc = enter_user_mode(entry, user_rsp);
+
+                                /* ВОССТАНАВЛИВАЕМ СТЕК ЯДРА! */
+                                kernel_rsp_saved = saved_rsp;
+
+                                return rc;
+                            }
+
                             void syscall_dispatch(struct regs *r) {
                                 uint64_t nr  = r->rax;
                                 uint64_t a1  = r->rdi;
@@ -143,8 +231,12 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 uint64_t ret = (uint64_t)-1;
 
                                 switch (nr) {
+                                    case 57: /* fork */    ret = sys_fork_entry(r);               break;
+                                    case 59: /* execve */  ret = sys_execve_entry(r, (const char *)a1); break;
+                                    case 61: /* wait */    ret = sys_wait_entry(a1);              break;
                                     case 83:          ret = sys_mkdir((const char *)a1, a2);      break;
                                     case 87:          ret = sys_unlink((const char *)a1);        break;
+                                    case 200:         ret = sys_spawn((const char *)a1);         break;
                                     case SYS_WRITE:   ret = sys_write(a1, (const char *)a2, a3); break;
                                     case SYS_OPEN:    ret = sys_open((const char *)a1, a2);      break;
                                     case SYS_READ:    ret = sys_read(a1, (void *)a2, a3);        break;
