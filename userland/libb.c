@@ -121,3 +121,6 @@ void printf(const char *fmt, ...) {
     }
     __builtin_va_end(ap);
 }
+long mkdir(const char *path, int mode) {
+    return _syscall6(SYS_MKDIR, (long)path, mode, 0, 0, 0);
+}

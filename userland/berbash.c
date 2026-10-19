@@ -74,6 +74,10 @@ static int builtin_help(int argc, char **argv) {
     puts("  help           this message\n");
     puts("  exit           exit shell\n");
     puts("  whoami         current user\n");
+    puts("  clear          clear screen\n");
+    puts("  reboot         reboot machine\n");
+    puts("  logoff         shut down (ACPI)\n");
+    puts("  mkdir <path>   create directory\n");
     puts("  touch <path>   create empty file\n");
     puts("  versi          versions\n");
     puts("  stat <path>    file info (size, type)\n");
@@ -279,10 +283,42 @@ static int builtin_tail(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_mkdir(int argc, char **argv) {
+    if (argc < 2) { puts("usage: mkdir <path>\n"); return 0; }
+    char abs_path[256];
+    make_abs(argv[1], abs_path);
+
+    long r = mkdir(abs_path, 0755);
+    if (r < 0) {
+        printf("\033[91malready_exists: %s\033[0m\n", argv[1]);
+    }
+    return 0;
+}
+
+static int builtin_clear(int argc, char **argv) {
+    (void)argc; (void)argv;
+    write(1, "\033[2J\033[H", 7);
+    return 0;
+}
+
 struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
 };
+
+static int builtin_reboot(int argc, char **argv) {
+    (void)argc; (void)argv;
+    puts("rebooting...\n");
+    _exit(100);
+    return 0;
+}
+
+static int builtin_logoff(int argc, char **argv) {
+    (void)argc; (void)argv;
+    puts("shutting down...\n");
+    _exit(101);
+    return 0;
+}
 
 static int builtin_rm(int argc, char **argv) {
     if (argc < 2) { puts("usage: rm <path>\n"); return 0; }
@@ -327,9 +363,13 @@ static struct builtin builtins[] = {
     { "touch",  builtin_touch  },
     { "pwd",    builtin_pwd    },
     { "cd",     builtin_cd     },
+    { "mkdir",  builtin_mkdir  },
     { "cat",    builtin_cat    },
+    { "reboot", builtin_reboot },
+    { "logoff", builtin_logoff },
     { "rm",     builtin_rm     },
     { "stat",   builtin_stat   },
+    { "clear",  builtin_clear  },
     { "head",   builtin_head   },
     { "tail",   builtin_tail   },
     { "crash",  builtin_crash  },

@@ -2,6 +2,13 @@
 #include "blockdev.h"
 #include "kstring.h"
 
+static void berfs_write_sb(struct berfs_mount *m) {
+    uint8_t buf[BLOCK_SIZE];
+    memset(buf, 0, sizeof(buf));
+    memcpy(buf, &m->sb, sizeof(m->sb));
+    bdev_write(1, buf);
+}
+
 int berfs_read_block(struct berfs_mount *m, uint32_t block, void *buf) {
     (void)m;
     return bdev_read(block, buf);
@@ -55,10 +62,12 @@ uint32_t berfs_alloc_block(struct berfs_mount *m) {
                         uint32_t blk = b * BLOCK_SIZE * 8 + i * 8 + bit;
                         if (blk < m->sb.sb_data_block) continue;
                         if (blk >= m->sb.sb_total_blocks) return 0;
+
                         buf[i] |= (1 << bit);
                         bdev_write(bitmap_start + b, buf);
+
                         m->sb.sb_free_blocks--;
-                        bdev_write(1, &m->sb);
+                        berfs_write_sb(m);
                         return blk;
                     }
                 }
@@ -79,10 +88,12 @@ uint32_t berfs_alloc_inode(struct berfs_mount *m) {
                 if (!(buf[i] & (1 << bit))) {
                     uint32_t ino = i * 8 + bit;
                     if (ino < 2 || ino >= m->sb.sb_total_inodes) continue;
+
                     buf[i] |= (1 << bit);
                     bdev_write(bitmap_start, buf);
+
                     m->sb.sb_free_inodes--;
-                    bdev_write(1, &m->sb);
+                    berfs_write_sb(m);
                     return ino;
                 }
             }
@@ -198,60 +209,61 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                                            if (berfs_file_write(m, dir_inode, pos, tmp, reclen) != 0) return -1;
                                                                                            if (berfs_write_inode(m, dir_ino, dir_inode) != 0) return -1;
                                                                                            return 0;
-                                                                                        }
-                                                                                        int berfs_free_block(struct berfs_mount *m, uint32_t blk) {
-                                                                                            if (blk < m->sb.sb_data_block || blk >= m->sb.sb_total_blocks) return -1;
-                                                                                            uint8_t buf[BLOCK_SIZE];
-                                                                                            uint32_t bitmap_start = m->sb.sb_block_bitmap_block;
-                                                                                            uint32_t byte_idx = blk / 8;
-                                                                                            uint32_t bit_idx = blk % 8;
+                                                                                                         }
 
-                                                                                            berfs_read_block(m, bitmap_start + (byte_idx / BLOCK_SIZE), buf);
-                                                                                            uint32_t off = byte_idx % BLOCK_SIZE;
-                                                                                            buf[off] &= ~(1 << bit_idx);
-                                                                                            bdev_write(bitmap_start + (byte_idx / BLOCK_SIZE), buf);
+                                                                                                         int berfs_free_block(struct berfs_mount *m, uint32_t blk) {
+                                                                                                             if (blk < m->sb.sb_data_block || blk >= m->sb.sb_total_blocks) return -1;
+                                                                                                             uint8_t buf[BLOCK_SIZE];
+                                                                                                             uint32_t bitmap_start = m->sb.sb_block_bitmap_block;
+                                                                                                             uint32_t byte_idx = blk / 8;
+                                                                                                             uint32_t bit_idx = blk % 8;
 
-                                                                                            m->sb.sb_free_blocks++;
-                                                                                            bdev_write(1, &m->sb);
-                                                                                            return 0;
-                                                                                        }
+                                                                                                             berfs_read_block(m, bitmap_start + (byte_idx / BLOCK_SIZE), buf);
+                                                                                                             uint32_t off = byte_idx % BLOCK_SIZE;
+                                                                                                             buf[off] &= ~(1 << bit_idx);
+                                                                                                             bdev_write(bitmap_start + (byte_idx / BLOCK_SIZE), buf);
 
-                                                                                        int berfs_free_inode(struct berfs_mount *m, uint32_t ino) {
-                                                                                            if (ino < 2 || ino >= m->sb.sb_total_inodes) return -1;
-                                                                                            uint8_t buf[BLOCK_SIZE];
-                                                                                            uint32_t bitmap_start = m->sb.sb_inode_bitmap_block;
-                                                                                            uint32_t byte_idx = ino / 8;
-                                                                                            uint32_t bit_idx = ino % 8;
+                                                                                                             m->sb.sb_free_blocks++;
+                                                                                                             berfs_write_sb(m);
+                                                                                                             return 0;
+                                                                                                         }
 
-                                                                                            berfs_read_block(m, bitmap_start, buf);
-                                                                                            buf[byte_idx] &= ~(1 << bit_idx);
-                                                                                            bdev_write(bitmap_start, buf);
+                                                                                                         int berfs_free_inode(struct berfs_mount *m, uint32_t ino) {
+                                                                                                             if (ino < 2 || ino >= m->sb.sb_total_inodes) return -1;
+                                                                                                             uint8_t buf[BLOCK_SIZE];
+                                                                                                             uint32_t bitmap_start = m->sb.sb_inode_bitmap_block;
+                                                                                                             uint32_t byte_idx = ino / 8;
+                                                                                                             uint32_t bit_idx = ino % 8;
 
-                                                                                            m->sb.sb_free_inodes++;
-                                                                                            bdev_write(1, &m->sb);
-                                                                                            return 0;
-                                                                                        }
-                                                                                        int berfs_dir_remove(struct berfs_mount *m, struct berfs_inode *dir_inode,
-                                                                                                             uint32_t dir_ino, const char *name) {
-                                                                                            uint32_t pos = 0;
-                                                                                            while (pos < dir_inode->i_size) {
-                                                                                                uint32_t start_pos = pos;
-                                                                                                struct berfs_dirent de;
-                                                                                                if (file_read_bytes(m, dir_inode, pos, &de, sizeof(de)) != 0) return -1;
-                                                                                                if (de.d_inode == 0) { pos += de.d_reclen; continue; }
+                                                                                                             berfs_read_block(m, bitmap_start, buf);
+                                                                                                             buf[byte_idx] &= ~(1 << bit_idx);
+                                                                                                             bdev_write(bitmap_start, buf);
 
-                                                                                                char entry_name[BERFS_NAME_MAX + 1];
-                                                                                                if (file_read_bytes(m, dir_inode, pos + sizeof(de), entry_name, de.d_name_len) != 0) return -1;
-                                                                                                entry_name[de.d_name_len] = '\0';
+                                                                                                             m->sb.sb_free_inodes++;
+                                                                                                             berfs_write_sb(m);
+                                                                                                             return 0;
+                                                                                                         }
 
-                                                                                                if (strcmp(entry_name, name) == 0) {
-                                                                                                    // Зануляем d_inode, чтобы пометить запись как удаленную
-                                                                                                    uint32_t zero = 0;
-                                                                                                    if (berfs_file_write(m, dir_inode, start_pos, &zero, 4) != 0) return -1;
-                                                                                                    if (berfs_write_inode(m, dir_ino, dir_inode) != 0) return -1;
-                                                                                                    return 0;
-                                                                                                }
-                                                                                                pos += de.d_reclen;
-                                                                                            }
-                                                                                            return -2; // not found
-                                                                                            }
+                                                                                                         int berfs_dir_remove(struct berfs_mount *m, struct berfs_inode *dir_inode,
+                                                                                                                              uint32_t dir_ino, const char *name) {
+                                                                                                             uint32_t pos = 0;
+                                                                                                             while (pos < dir_inode->i_size) {
+                                                                                                                 uint32_t start_pos = pos;
+                                                                                                                 struct berfs_dirent de;
+                                                                                                                 if (file_read_bytes(m, dir_inode, pos, &de, sizeof(de)) != 0) return -1;
+                                                                                                                 if (de.d_inode == 0) { pos += de.d_reclen; continue; }
+
+                                                                                                                 char entry_name[BERFS_NAME_MAX + 1];
+                                                                                                                 if (file_read_bytes(m, dir_inode, pos + sizeof(de), entry_name, de.d_name_len) != 0) return -1;
+                                                                                                                 entry_name[de.d_name_len] = '\0';
+
+                                                                                                                 if (strcmp(entry_name, name) == 0) {
+                                                                                                                     uint32_t zero = 0;
+                                                                                                                     if (berfs_file_write(m, dir_inode, start_pos, &zero, 4) != 0) return -1;
+                                                                                                                     if (berfs_write_inode(m, dir_ino, dir_inode) != 0) return -1;
+                                                                                                                     return 0;
+                                                                                                                 }
+                                                                                                                 pos += de.d_reclen;
+                                                                                                             }
+                                                                                                             return -2;
+                                                                                                                              }

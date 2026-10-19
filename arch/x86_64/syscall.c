@@ -20,7 +20,10 @@ static void put_u64(uint64_t v) {
 /* sys_write(fd, buf, len) */
 static uint64_t sys_write(uint64_t fd, const void *buf, uint64_t len) {
     if (fd == 1 || fd == 2) {
-        for (uint64_t i = 0; i < len; i++) term_putchar(((const char *)buf)[i]);
+        const char *s = (const char *)buf;
+        for (uint64_t i = 0; i < len; i++) {
+            term_putchar(s[i]);
+        }
         return len;
     }
     int r = vfs_write((int)fd, buf, (uint32_t)len);
@@ -105,12 +108,18 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
 
                             /* sys_exit_to_kernel(code) */
                             extern void exit_to_kernel(uint64_t code);
+                            extern void reboot_now(void);
+                            extern void logoff_now(void);
 
                             static uint64_t sys_exit(uint64_t code) {
                                 term_write("\n[user] exit(");
                                 put_u64(code);
                                 term_write(")\n");
-                                exit_to_kernel(code);   /* никогда не возвращается */
+
+                                if (code == 100) reboot_now();
+                                if (code == 101) logoff_now();
+
+                                exit_to_kernel(code);
                                 return 0;
                             }
                             extern int vfs_unlink(const char *path);
@@ -119,6 +128,13 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 if (!path) return (uint64_t)-1;
                                 return (uint64_t)vfs_unlink(path);
                             }
+
+                            static uint64_t sys_mkdir(const char *path, uint64_t mode) {
+                                (void)mode;
+                                if (!path) return (uint64_t)-1;
+                                return (uint64_t)vfs_mkdir(path);
+                            }
+
                             void syscall_dispatch(struct regs *r) {
                                 uint64_t nr  = r->rax;
                                 uint64_t a1  = r->rdi;
@@ -127,6 +143,7 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
                                 uint64_t ret = (uint64_t)-1;
 
                                 switch (nr) {
+                                    case 83:          ret = sys_mkdir((const char *)a1, a2);      break;
                                     case 87:          ret = sys_unlink((const char *)a1);        break;
                                     case SYS_WRITE:   ret = sys_write(a1, (const char *)a2, a3); break;
                                     case SYS_OPEN:    ret = sys_open((const char *)a1, a2);      break;

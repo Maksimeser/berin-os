@@ -91,7 +91,12 @@ void term_clear(void) {
         for (size_t x = 0; x < VGA_WIDTH; x++)
             VGA_MEMORY[y * VGA_WIDTH + x] = vga_entry(' ', term_color);
     term_row = 0;
-    term_col = 0;
+    term_col = 0; {
+        outb(0x3D4, 0x0F);
+        outb(0x3D5, 0x00);
+        outb(0x3D4, 0x0E);
+        outb(0x3D5, 0x00);
+    }
 }
 
 static void term_scroll(void) {
@@ -113,15 +118,24 @@ static void term_emit(char c) {
         term_col = 0;
     } else {
         if (term_row < VGA_HEIGHT && term_col < VGA_WIDTH)
-            VGA_MEMORY[term_row * VGA_WIDTH + term_col] =
-            vga_entry((unsigned char)c, term_color);
+            VGA_MEMORY[term_row * VGA_WIDTH + term_col] = vga_entry((unsigned char)c, term_color);
         term_col++;
     }
+
     if (term_col >= VGA_WIDTH) { term_col = 0; term_row++; }
+
     if (term_row >= VGA_HEIGHT) term_scroll();
 
     if (c == '\n') serial_write_char('\r');
     serial_write_char(c);
+
+    {
+        uint16_t pos = (uint16_t)(term_row * VGA_WIDTH + term_col);
+        outb(0x3D4, 0x0F);
+        outb(0x3D5, (uint8_t)(pos & 0xFF));
+        outb(0x3D4, 0x0E);
+        outb(0x3D5, (uint8_t)((pos >> 8) & 0xFF));
+    }
 }
 
 /* -------- ANSI escape parser -------- */
@@ -238,7 +252,7 @@ static int tokenize(char *s, char **argv, int max) {
     return argc;
 }
 
-static void reboot_now(void) {
+void reboot_now(void) {
     while (inb(0x64) & 0x02) ;
     outb(0x64, 0xFE);
     outw(0x604, 0x2000);
@@ -248,7 +262,7 @@ static void reboot_now(void) {
     for (;;) __asm__ __volatile__("hlt");
 }
 
-static void logoff_now(void) {
+void logoff_now(void) {
     outw(0x604, 0x2000);
     outw(0x4004, 0x2000);
     outw(0xB004, 0x2000);

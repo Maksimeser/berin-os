@@ -30,7 +30,7 @@ static void ata_io_wait(void) {
 }
 
 static int ata_wait_ready(int check_drq) {
-    for (int i = 0; i < 1000000; i++) {
+    for (int i = 0; i < 100000; i++) {
         uint8_t st = inb(ATA_PRIMARY_IO + ATA_REG_STATUS);
         if (st & ATA_SR_ERR) return -1;
         if (st & ATA_SR_DF)  return -2;
@@ -38,6 +38,7 @@ static int ata_wait_ready(int check_drq) {
             if (!check_drq) return 0;
             if (st & ATA_SR_DRQ) return 0;
         }
+        __asm__ __volatile__("pause");
     }
     return -3;
 }

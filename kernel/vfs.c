@@ -201,6 +201,41 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       return 0;
                                   }
 
+                                  int vfs_mkdir(const char *path) {
+                                      struct vfs_mount *m;
+                                      uint32_t existing_ino;
+                                      if (vfs_resolve(path, &m, &existing_ino) == 0) return -2;
+
+                                      const char *rel;
+                                      m = find_mount(path, &rel);
+                                      if (!m) return -1;
+
+                                      while (*rel == '/') rel++;
+                                      if (!*rel || strcmp(rel, "") == 0) return -1;
+                                      const char *name = rel;
+
+                                      struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
+
+                                      uint32_t ino = berfs_alloc_inode(bm);
+                                      if (ino == 0) return -3;
+
+                                      struct berfs_inode new_dir;
+                                      memset(&new_dir, 0, sizeof(new_dir));
+                                      new_dir.i_mode = BERFS_TYPE_DIR | 0755;
+                                      new_dir.i_size = 0;
+                                      new_dir.i_links_count = 2;
+
+                                      berfs_dir_add(bm, &new_dir, ino, ".", ino, BERFS_DT_DIR);
+                                      berfs_dir_add(bm, &new_dir, ino, "..", BERFS_ROOT_INODE, BERFS_DT_DIR);
+                                      berfs_write_inode(bm, ino, &new_dir);
+
+                                      struct berfs_inode root;
+                                      berfs_read_inode(bm, BERFS_ROOT_INODE, &root);
+                                      berfs_dir_add(bm, &root, BERFS_ROOT_INODE, name, ino, BERFS_DT_DIR);
+
+                                      return 0;
+                                  }
+
                                   static int bf_read(struct vfs_mount *m, uint32_t ino, uint32_t pos, void *buf, uint32_t len) {
                                       struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
                                       struct berfs_inode in;
