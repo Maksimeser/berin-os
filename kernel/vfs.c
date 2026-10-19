@@ -34,8 +34,6 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
     return 0;
                   }
 
-                  /* Find mount whose path is prefix of absolute path.
-                   * Returns mount and pointer to relative path (may be ""). */
                   static struct vfs_mount *find_mount(const char *path, const char **rest) {
                       int best_len = -1;
                       struct vfs_mount *best = 0;
@@ -52,12 +50,9 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                       return best;
                   }
 
-                  /* Walk path components within a mount. Returns ino. */
                   static uint32_t walk(struct vfs_mount *m, uint32_t start_ino, const char *rel) {
                       uint32_t cur = start_ino;
                       if (!rel || !*rel || (rel[0] == '/' && !rel[1])) return cur;
-
-                      /* skip leading '/' */
                       while (*rel == '/') rel++;
 
                       char name[BERFS_NAME_MAX + 1];
@@ -66,7 +61,6 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                           while (*rel && *rel != '/' && n < BERFS_NAME_MAX) name[n++] = *rel++;
                           name[n] = '\0';
                           while (*rel == '/') rel++;
-
                           uint32_t next;
                           if (m->ops->lookup(m, cur, name, &next) != 0) return 0;
                           cur = next;
@@ -129,6 +123,24 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                       return r;
                   }
 
+                  int vfs_write(int fd, const void *buf, uint32_t len) {
+                      if (fd < 0 || fd >= VFS_MAX_FILES) return -1;
+                      struct vfs_open_file *f = &g_files[fd];
+                      if (!f->used) return -2;
+
+                      struct berfs_mount *bm = (struct berfs_mount *)f->mount->fs_data;
+                      struct berfs_inode in;
+                      if (berfs_read_inode(bm, f->ino, &in) != 0) return -3;
+
+                      int r = berfs_file_write(bm, &in, f->pos, buf, len);
+                      if (r == 0) {
+                          berfs_write_inode(bm, f->ino, &in);
+                          f->pos += len;
+                          return len;
+                      }
+                      return -1;
+                  }
+
                   int vfs_close(int fd) {
                       if (fd < 0 || fd >= VFS_MAX_FILES) return -1;
                       if (!g_files[fd].used) return -2;
@@ -147,7 +159,37 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                       return m->ops->readdir(m, dir_ino, pos, name, ino, type);
                                   }
 
-                                  /* ---------- BerFS backend ---------- */
+                                  int vfs_create(const char *path) {
+                                      struct vfs_mount *m;
+                                      uint32_t existing_ino;
+                                      if (vfs_resolve(path, &m, &existing_ino) == 0) return -2;
+
+                                      const char *rel;
+                                      m = find_mount(path, &rel);
+                                      if (!m) return -1;
+
+                                      while (*rel == '/') rel++;
+                                      if (!*rel || strcmp(rel, "") == 0) return -1;
+                                      const char *name = rel;
+
+                                      struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
+                                      uint32_t ino = berfs_alloc_inode(bm);
+                                      if (ino == 0) return -3;
+
+                                      struct berfs_inode in;
+                                      memset(&in, 0, sizeof(in));
+                                      in.i_mode = BERFS_TYPE_FILE | 0644;
+                                      in.i_size = 0;
+                                      in.i_links_count = 1;
+
+                                      berfs_write_inode(bm, ino, &in);
+
+                                      struct berfs_inode root;
+                                      berfs_read_inode(bm, BERFS_ROOT_INODE, &root);
+                                      berfs_dir_add(bm, &root, BERFS_ROOT_INODE, name, ino, BERFS_DT_FILE);
+
+                                      return 0;
+                                  }
 
                                   static int bf_read(struct vfs_mount *m, uint32_t ino, uint32_t pos, void *buf, uint32_t len) {
                                       struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
@@ -198,7 +240,6 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                                             .stat    = bf_stat,
                                                         };
 
-                                                        /* Registered from kernel_main after BerFS mount */
                                                         int vfs_mount_berfs(struct berfs_mount *bm) {
                                                             return vfs_mount_add("/", BERFS_ROOT_INODE, &berfs_ops, bm);
                                                         }

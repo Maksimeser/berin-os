@@ -18,15 +18,22 @@ static void put_u64(uint64_t v) {
 }
 
 /* sys_write(fd, buf, len) */
-static uint64_t sys_write(uint64_t fd, const char *buf, uint64_t len) {
-    if (fd != 1 && fd != 2) return (uint64_t)-1;
-    for (uint64_t i = 0; i < len; i++) term_putchar(buf[i]);
-    return len;
+static uint64_t sys_write(uint64_t fd, const void *buf, uint64_t len) {
+    if (fd == 1 || fd == 2) {
+        for (uint64_t i = 0; i < len; i++) term_putchar(((const char *)buf)[i]);
+        return len;
+    }
+    int r = vfs_write((int)fd, buf, (uint32_t)len);
+    if (r < 0) return (uint64_t)-1;
+    return (uint64_t)r;
 }
 
 /* sys_open(path, flags) */
 static uint64_t sys_open(const char *path, uint64_t flags) {
     if (!path) return (uint64_t)-1;
+    if ((flags & 0x04) && vfs_resolve(path, 0, 0) != 0) {
+        vfs_create(path);
+    }
     int fd = vfs_open(path, (int)flags);
     if (fd < 0) return (uint64_t)-1;
     return (uint64_t)fd;

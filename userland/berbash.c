@@ -53,6 +53,7 @@ static int builtin_help(int argc, char **argv) {
     puts("  help           this message\n");
     puts("  exit           exit shell\n");
     puts("  whoami         current user\n");
+    puts("  touch <path>   create empty file\n");
     puts("  versi          versions\n");
     puts("  stat <path>    file info (size, type)\n");
     puts("  head [n- N] <f>print first N lines (default 10)\n");
@@ -262,6 +263,16 @@ struct builtin {
     int (*fn)(int argc, char **argv);
 };
 
+static int builtin_touch(int argc, char **argv) {
+    if (argc < 2) { puts("usage: touch <path>\n"); return 0; }
+    char abs_path[256];
+    make_abs(argv[1], abs_path);
+    int fd = open(abs_path, O_RDWR | 0x04);
+    if (fd < 0) printf("\033[91mnot_found: %s\033[0m\n", argv[1]);
+    else close(fd);
+    return 0;
+}
+
 static int builtin_crash(int argc, char **argv) {
     (void)argc; (void)argv;
     puts("[user] triggering divide error from ring 3...\n");
@@ -279,6 +290,7 @@ static struct builtin builtins[] = {
     { "whoami", builtin_whoami },
     { "versi",  builtin_versi  },
     { "ls",     builtin_ls     },
+    { "touch",  builtin_touch  },
     { "pwd",    builtin_pwd    },
     { "cd",     builtin_cd     },
     { "cat",    builtin_cat    },
