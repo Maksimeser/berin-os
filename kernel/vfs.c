@@ -103,7 +103,7 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                       if (m->ops->stat(m, ino, &size, &type) != 0) return -2;
                       if (type != VFS_FILE) return -3;
 
-                      for (int i = 0; i < VFS_MAX_FILES; i++) {
+                      for (int i = 3; i < VFS_MAX_FILES; i++) {
                           if (!g_files[i].used) {
                               g_files[i].used  = 1;
                               g_files[i].mount = m;

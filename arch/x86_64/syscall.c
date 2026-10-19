@@ -4,7 +4,9 @@
 
 #include "syscall.h"
 #include "vfs.h"
+#include "keyboard.h"
 
+extern char berin_input_getchar(void);
 extern void term_write(const char *s);
 extern void term_putchar(char c);
 
@@ -30,8 +32,33 @@ static uint64_t sys_open(const char *path, uint64_t flags) {
     return (uint64_t)fd;
 }
 
-/* sys_read(fd, buf, len) */
 static uint64_t sys_read(uint64_t fd, void *buf, uint64_t len) {
+    if (fd == 0) {
+        __asm__ __volatile__("sti");
+        uint8_t *p = (uint8_t *)buf;
+        uint64_t n = 0;
+        while (n < len) {
+            char c = berin_input_getchar();
+            if (c == '\r' || c == '\n') {
+                term_putchar('\n');
+                p[n++] = '\n';
+                break;
+            }
+            if (c == 0x7F || c == '\b') {
+                if (n > 0) {
+                    n--;
+                    term_putchar('\b');
+                    term_putchar(' ');
+                    term_putchar('\b');
+                }
+                continue;
+            }
+            if ((unsigned char)c < 0x20) continue;
+            p[n++] = (uint8_t)c;
+            term_putchar(c);
+        }
+        return n;
+    }
     int n = vfs_read((int)fd, buf, (uint32_t)len);
     if (n < 0) return (uint64_t)-1;
     return (uint64_t)n;
@@ -66,13 +93,14 @@ static uint64_t sys_listdir(const char *path, uint32_t *pos,
     return (uint64_t)r;   /* 1 = entry, 0 = end */
                             }
 
-                            /* sys_exit(code) */
+                            /* sys_exit_to_kernel(code) */
+                            extern void exit_to_kernel(uint64_t code);
+
                             static uint64_t sys_exit(uint64_t code) {
                                 term_write("\n[user] exit(");
                                 put_u64(code);
-                                term_write(") — process ended\n");
-                                /* for now: halt */
-                                for (;;) __asm__ __volatile__("cli; hlt");
+                                term_write(")\n");
+                                exit_to_kernel(code);   /* никогда не возвращается */
                                 return 0;
                             }
 

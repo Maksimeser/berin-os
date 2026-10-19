@@ -1,5 +1,4 @@
-; Berin - x86_64 interrupt stubs (256 vectors)
-
+; Berin OS - x86_64 interrupt stubs (256 vectors) + enter_user_mode
 %macro ISR_NOERR 1
 global isr%1
 isr%1:
@@ -18,7 +17,6 @@ isr%1:
 section .text
 bits 64
 
-; CPU exceptions (with error code: 8, 10..14, 17, 21, 29, 30)
 ISR_NOERR 0
 ISR_NOERR 1
 ISR_NOERR 2
@@ -60,19 +58,7 @@ ISR_NOERR 31
 
 extern isr_handler
 
-global enter_user_mode
-enter_user_mode:
-    ; rdi = user entry, rsi = user rsp
-    mov rax, rsi
-    push qword 0x23        ; SS  (user data | RPL 3)
-    push rax               ; RSP (user)
-    push qword 0x202       ; RFLAGS (IF=1)
-    push qword 0x1B        ; CS  (user code | RPL 3)
-    push rdi               ; RIP (user entry)
-    iretq
-
 isr_common:
-    ; save all GPRs (order must match struct regs)
     push rax
     push rcx
     push rdx
@@ -90,7 +76,7 @@ isr_common:
     push r15
 
     cld
-    mov rdi, rsp            ; struct regs *r
+    mov rdi, rsp
     call isr_handler
 
     pop r15
@@ -109,7 +95,7 @@ isr_common:
     pop rcx
     pop rax
 
-    add rsp, 16             ; pop int_no + err_code
+    add rsp, 16
     iretq
 
 section .rodata
@@ -120,3 +106,30 @@ isr_stub_table:
     dq isr%+i
 %assign i i+1
 %endrep
+
+section .data
+align 8
+global kernel_rsp_saved
+kernel_rsp_saved: dq 0
+
+section .text
+global enter_user_mode
+enter_user_mode:
+    mov rax, rdi
+    mov [kernel_rsp_saved], rsp
+
+    mov rax, rsi
+    push qword 0x23
+    push rax
+    push qword 0x202
+    push qword 0x1B
+    push rdi
+    iretq
+
+global exit_to_kernel
+exit_to_kernel:
+    mov rsp, [kernel_rsp_saved]
+    sti
+    ret
+
+section .note.GNU-stack noalloc noexec nowrite progbits

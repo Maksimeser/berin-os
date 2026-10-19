@@ -198,6 +198,8 @@ static char input_getchar(void) {
     }
 }
 
+char berin_input_getchar(void) { return input_getchar(); }
+
 /* ============================================================
  *  kerbash
  * ============================================================ */
@@ -416,7 +418,7 @@ static int builtin_kmtest(int argc, char **argv) {
     return 0;
 }
 
-extern void enter_user_mode(uint64_t entry, uint64_t user_rsp);
+extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
 
 static int builtin_meminfo(int argc, char **argv) {
     (void)argc; (void)argv;
@@ -571,7 +573,11 @@ static int builtin_elf(int argc, char **argv) {
     term_write("[ elf ] entering ring 3...\n");
 
     uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
-    enter_user_mode(entry, user_rsp);
+
+    uint64_t rc = enter_user_mode(entry, user_rsp);
+    term_write("[elf] user returned, code=");
+    put_u64(rc);
+    term_putchar('\n');
     return 0;
 }
 
@@ -804,4 +810,5 @@ int mrc = berfs_mount_fs(&g_root);
 
     for (;;)
         __asm__ __volatile__("cli; hlt");
+
 }
