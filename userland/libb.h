@@ -17,6 +17,11 @@
 #define O_WRONLY 0x02
 #define O_RDWR   0x03
 
+struct stat_buf {
+    uint32_t size;
+    uint8_t  type;
+};
+
 /* low-level */
 long _syscall6(long n, long a, long b, long c, long d, long e);
 long read (int fd, void *buf, size_t len);
