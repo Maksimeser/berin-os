@@ -97,6 +97,16 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                       if (m->ops->stat(m, ino, &size, &type) != 0) return -2;
                       if (type != VFS_FILE) return -3;
 
+                      if (flags & O_TRUNC) {
+                          struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
+                          struct berfs_inode in;
+                          if (berfs_read_inode(bm, ino, &in) == 0) {
+                              in.i_size = 0;
+                              berfs_write_inode(bm, ino, &in);
+                          }
+                          size = 0;
+                      }
+
                       for (int i = 3; i < VFS_MAX_FILES; i++) {
                           if (!g_files[i].used) {
                               g_files[i].used  = 1;

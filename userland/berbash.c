@@ -34,11 +34,32 @@ static void print_prompt(void) {
 /* ------- builtins ------- */
 
 static int builtin_echo(int argc, char **argv) {
-    for (int i = 1; i < argc; i++) {
-        if (i > 1) putchar_(' ');
-        puts(argv[i]);
+    if (argc < 2) { putchar_('\n'); return 0; }
+
+    int redirect = 0;
+    int out_fd = 1;
+    char abs_path[256];
+
+    if (argc >= 3 && str_eq(argv[argc - 2], ">")) {
+        redirect = 1;
+        const char *filename = argv[argc - 1];
+        make_abs(filename, abs_path);
+
+        out_fd = open(abs_path, O_WRONLY | O_CREAT | O_TRUNC);
+        if (out_fd < 0) {
+            printf("\033[91mnot_found: %s\033[0m\n", filename);
+            return 0;
+        }
+        argc -= 2;
     }
-    putchar_('\n');
+
+    for (int i = 1; i < argc; i++) {
+        if (i > 1) write(out_fd, " ", 1);
+        write(out_fd, argv[i], strlen(argv[i]));
+    }
+    write(out_fd, "\n", 1);
+
+    if (redirect) close(out_fd);
     return 0;
 }
 
@@ -267,7 +288,7 @@ static int builtin_touch(int argc, char **argv) {
     if (argc < 2) { puts("usage: touch <path>\n"); return 0; }
     char abs_path[256];
     make_abs(argv[1], abs_path);
-    int fd = open(abs_path, O_RDWR | 0x04);
+    int fd = open(abs_path, O_RDWR | O_CREAT);
     if (fd < 0) printf("\033[91mnot_found: %s\033[0m\n", argv[1]);
     else close(fd);
     return 0;
