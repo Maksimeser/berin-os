@@ -11,12 +11,13 @@ switch_to:
     push r14
     push r15
 
-    ; Сохраняем текущий kernel_rsp в prev (offset 168)
-    mov [rdi + 168], rsp
+    ; Сохраняем текущий RSP в prev->kernel_rsp (смещение 16)
+    mov [rdi + 16], rsp
 
-    ; Загружаем kernel_rsp из next
-    mov rsp, [rsi + 168]
+    ; Загружаем RSP из next->kernel_rsp
+    mov rsp, [rsi + 16]
 
+    ; Восстанавливаем регистры
     pop r15
     pop r14
     pop r13
@@ -25,4 +26,8 @@ switch_to:
     pop rbp
     ret
 
-section .note.GNU-stack noalloc noexec nowrite progbits
+global task_ret_to_user
+task_ret_to_user:
+    ; На стеке лежит фрейм: SS, RSP, RFLAGS, CS, RIP
+    ; Мы уже в Ring 0, стек ядра. iretq вернет нас в Ring 3.
+    iretq

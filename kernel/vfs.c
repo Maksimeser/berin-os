@@ -2,6 +2,7 @@
 #include "kberfs.h"
 #include "kstring.h"
 
+/* Разбивает /a/b/c на parent="/a/b" и name="c" */
 static int split_path(const char *path, char *parent, char *name) {
     const char *last = 0;
     for (const char *p = path; *p; p++) if (*p == '/') last = p;
@@ -15,7 +16,7 @@ static int split_path(const char *path, char *parent, char *name) {
     while (last[1+nlen]) { name[nlen] = last[1+nlen]; nlen++; }
     name[nlen] = '\0';
 
-    if (nlen == 0) return -1; // Путь заканчивается на слэш
+    if (nlen == 0) return -1;
     return 0;
 }
 
@@ -189,7 +190,7 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                   int vfs_create(const char *path) {
                                       struct vfs_mount *m;
                                       uint32_t existing_ino;
-                                      if (vfs_resolve(path, &m, &existing_ino) == 0) return -2; // Уже существует
+                                      if (vfs_resolve(path, &m, &existing_ino) == 0) return -2;
 
                                       char parent_path[256], name[256];
                                       if (split_path(path, parent_path, name) != 0) return -1;
@@ -218,7 +219,7 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                   int vfs_mkdir(const char *path) {
                                       struct vfs_mount *m;
                                       uint32_t existing_ino;
-                                      if (vfs_resolve(path, &m, &existing_ino) == 0) return -2; // Уже существует
+                                      if (vfs_resolve(path, &m, &existing_ino) == 0) return -2;
 
                                       char parent_path[256], name[256];
                                       if (split_path(path, parent_path, name) != 0) return -1;
@@ -237,7 +238,6 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       new_dir.i_size = 0;
                                       new_dir.i_links_count = 2;
 
-                                      // Указываем реальный родительский inode в ".."
                                       berfs_dir_add(bm, &new_dir, ino, ".", ino, BERFS_DT_DIR);
                                       berfs_dir_add(bm, &new_dir, ino, "..", parent_ino, BERFS_DT_DIR);
                                       berfs_write_inode(bm, ino, &new_dir);
@@ -245,6 +245,36 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       struct berfs_inode parent;
                                       berfs_read_inode(bm, parent_ino, &parent);
                                       berfs_dir_add(bm, &parent, parent_ino, name, ino, BERFS_DT_DIR);
+                                      return 0;
+                                  }
+
+                                  int vfs_unlink(const char *path) {
+                                      char parent_path[256], name[256];
+                                      if (split_path(path, parent_path, name) != 0) return -1;
+
+                                      struct vfs_mount *m;
+                                      uint32_t parent_ino;
+                                      if (vfs_resolve(parent_path, &m, &parent_ino) != 0) return -2;
+
+                                      uint32_t ino;
+                                      if (vfs_resolve(path, &m, &ino) != 0) return -1;
+
+                                      struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
+                                      struct berfs_inode parent;
+                                      if (berfs_read_inode(bm, parent_ino, &parent) != 0) return -1;
+
+                                      if (berfs_dir_remove(bm, &parent, parent_ino, name) != 0) return -2;
+
+                                      struct berfs_inode in;
+                                      if (berfs_read_inode(bm, ino, &in) == 0) {
+                                          for (int i = 0; i < BERFS_DIRECT_BLOCKS; i++) {
+                                              if (in.i_block[i] != 0) {
+                                                  berfs_free_block(bm, in.i_block[i]);
+                                                  in.i_block[i] = 0;
+                                              }
+                                          }
+                                      }
+                                      berfs_free_inode(bm, ino);
                                       return 0;
                                   }
 
@@ -299,33 +329,4 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
 
                                                         int vfs_mount_berfs(struct berfs_mount *bm) {
                                                             return vfs_mount_add("/", BERFS_ROOT_INODE, &berfs_ops, bm);
-                                                        }
-                                                        int vfs_unlink(const char *path) {
-                                                            char parent_path[256], name[256];
-                                                            if (split_path(path, parent_path, name) != 0) return -1;
-
-                                                            struct vfs_mount *m;
-                                                            uint32_t parent_ino;
-                                                            if (vfs_resolve(parent_path, &m, &parent_ino) != 0) return -2;
-
-                                                            uint32_t ino;
-                                                            if (vfs_resolve(path, &m, &ino) != 0) return -1;
-
-                                                            struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
-                                                            struct berfs_inode parent;
-                                                            if (berfs_read_inode(bm, parent_ino, &parent) != 0) return -1;
-
-                                                            if (berfs_dir_remove(bm, &parent, parent_ino, name) != 0) return -2;
-
-                                                            struct berfs_inode in;
-                                                            if (berfs_read_inode(bm, ino, &in) == 0) {
-                                                                for (int i = 0; i < BERFS_DIRECT_BLOCKS; i++) {
-                                                                    if (in.i_block[i] != 0) {
-                                                                        berfs_free_block(bm, in.i_block[i]);
-                                                                        in.i_block[i] = 0;
-                                                                    }
-                                                                }
-                                                            }
-                                                            berfs_free_inode(bm, ino);
-                                                            return 0;
                                                         }

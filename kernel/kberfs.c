@@ -266,4 +266,9 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                                                                  pos += de.d_reclen;
                                                                                                              }
                                                                                                              return -2;
-                                                                                                                              }
+                                                                                                        }
+                                                                                                        int berfs_sync(struct berfs_mount *m) {
+                                                                                                            (void)m;
+                                                                                                            // TODO:
+                                                                                                            return 0;
+                                                                                                        }

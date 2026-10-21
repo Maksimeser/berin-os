@@ -42,21 +42,26 @@ static void map_int_to_panic(uint64_t n, uint16_t *code, const char **name) {
     switch (n) {
         case  0: *code = 3;  *name = "divide_error";         return;
         case  1: *code = 0;  *name = "debug";                return;
-        case  2: *code = 0;  *name = "nmi";                  return;
+        case  2: *code = 0;  *name = "nmi_interrupt";        return;
         case  3: *code = 0;  *name = "breakpoint";           return;
         case  4: *code = 0;  *name = "overflow";             return;
-        case  5: *code = 0;  *name = "bound_range";          return;
+        case  5: *code = 0;  *name = "bound_range_exceeded"; return;
         case  6: *code = 6;  *name = "invalid_opcode";       return;
         case  7: *code = 0;  *name = "device_not_available"; return;
         case  8: *code = 4;  *name = "double_fault";         return;
+        case  9: *code = 0;  *name = "coprocessor_segment";  return;
         case 10: *code = 0;  *name = "invalid_tss";          return;
         case 11: *code = 8;  *name = "segment_not_present";  return;
-        case 12: *code = 7;  *name = "stack_segment";        return;
+        case 12: *code = 7;  *name = "stack_segment_fault";  return;
         case 13: *code = 2;  *name = "general_protection";   return;
         case 14: *code = 1;  *name = "page_fault";           return;
-        case 16: *code = 0;  *name = "x87_fp";               return;
+        case 15: *code = 0;  *name = "reserved_exception";   return;
+        case 16: *code = 0;  *name = "x87_floating_point";   return;
         case 17: *code = 9;  *name = "alignment_check";      return;
         case 18: *code = 10; *name = "machine_check";        return;
+        case 19: *code = 0;  *name = "simd_floating_point";  return;
+        case 20: *code = 0;  *name = "virtualization_exception"; return;
+        case 21: *code = 0;  *name = "control_protection";   return;
         default: *code = 0;  *name = "unknown_error";        return;
     }
 }

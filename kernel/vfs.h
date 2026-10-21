@@ -48,5 +48,6 @@ int  vfs_listdir(const char *path, uint32_t *pos, char *name, uint32_t *ino, uin
 int  vfs_mount_berfs(struct berfs_mount *bm);
 int  vfs_create(const char *path);
 int  vfs_mkdir(const char *path);
+int  vfs_unlink(const char *path);
 
 #endif

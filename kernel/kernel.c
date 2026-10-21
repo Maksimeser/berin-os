@@ -11,6 +11,7 @@
 #include "paging.h"
 #include <stdint.h>
 #include <stddef.h>
+#include "sched.h"
 #include "idt.h"
 #include "elf.h"
 #include "vmm.h"
@@ -201,7 +202,7 @@ void term_write(const char *s) {
  * ============================================================ */
 static volatile uint64_t ticks = 0;
 void timer_tick(void) { ticks++; }
-
+uint64_t get_ticks(void) { return ticks; }
 /* ============================================================
  *  Input: keyboard (QEMU window) + serial (host terminal)
  * ============================================================ */
@@ -863,6 +864,7 @@ int mrc = berfs_mount_fs(&g_root);
     term_write("vendor: Turker Games\n");
     term_write("\n");
 
+    sched_init();
     kerbash_run();
 
     for (;;)
