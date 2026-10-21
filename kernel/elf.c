@@ -1,13 +1,11 @@
-/* Berin - ELF64 loader (with VMM support) */
-
 #include "elf.h"
 #include "vmm.h"
 #include "pmm.h"
 #include "kstring.h"
 
 int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry_out) {
+    (void)pml4; // Пока игнорируем VMM для прямого запуска
     if (size < sizeof(struct elf64_ehdr)) return -1;
-
     const struct elf64_ehdr *eh = (const struct elf64_ehdr *)data;
 
     if (*(const uint32_t *)eh->e_ident != ELF_MAGIC) return -1;
@@ -25,14 +23,7 @@ int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry
         uint64_t vaddr_end = ph->p_vaddr + ph->p_memsz;
 
         for (uint64_t vaddr = vaddr_start & ~0xFFFULL; vaddr < vaddr_end; vaddr += 4096) {
-            uint64_t phys = vmm_get_phys(pml4, vaddr);
-            if (phys == 0) {
-                void *new_page = pmm_alloc_page();
-                if (!new_page) return -1;
-                memset(new_page, 0, 4096);
-                vmm_map_page(pml4, vaddr, (uint64_t)new_page, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
-                phys = (uint64_t)new_page;
-            }
+            uint64_t phys = vaddr; // Identity map
 
             uint64_t page_start = vaddr;
             uint64_t page_end = vaddr + 4096;
@@ -47,7 +38,6 @@ int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry
             }
         }
     }
-
     *entry_out = eh->e_entry;
     return 0;
 }

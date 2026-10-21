@@ -106,48 +106,13 @@ static uint64_t sys_exit(uint64_t code) {
     if (code == 100) { reboot_now(); }
     if (code == 101) { logoff_now(); }
 
-    task_exit((int)code);
-    return 0; // unreachable
+    exit_to_kernel(code);
+    return 0;
 }
 
 static uint64_t sys_spawn(const char *path) {
-    if (!path) return (uint64_t)-1;
-
-    uint32_t size; uint8_t type;
-    if (vfs_stat(path, &size, &type) != 0) return (uint64_t)-1;
-
-    void *code = kmalloc(size);
-    if (!code) return (uint64_t)-1;
-
-    int fd = vfs_open(path, O_RDONLY);
-    if (fd < 0) { kfree(code); return (uint64_t)-1; }
-    vfs_read(fd, code, size);
-    vfs_close(fd);
-
-    uint64_t *new_pml4 = vmm_create_pml4();
-    if (!new_pml4) { kfree(code); return (uint64_t)-1; }
-
-    uint64_t entry = 0;
-    if (elf_load(code, size, new_pml4, &entry) != 0) {
-        kfree(code);
-        return (uint64_t)-1;
-    }
-    kfree(code);
-
-    void *stack_phys = pmm_alloc_page();
-    uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
-    vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
-
-    uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
-
-    // Создаем задачу в планировщике
-    struct task *t = task_create(entry, new_pml4, user_rsp);
-    if (!t) return (uint64_t)-1;
-
-    // Переключаемся на нее (родитель засыпает до exit ребенка)
-    schedule();
-
-    return 0;
+    (void)path;
+    return (uint64_t)-1;
 }
 
 /* ================= ДИСПЕТЧЕР ================= */

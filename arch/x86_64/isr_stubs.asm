@@ -125,11 +125,3 @@ enter_user_mode:
     push qword 0x1B
     push rdi
     iretq
-
-global exit_to_kernel
-exit_to_kernel:
-    mov rsp, [kernel_rsp_saved]
-    sti
-    ret
-
-section .note.GNU-stack noalloc noexec nowrite progbits

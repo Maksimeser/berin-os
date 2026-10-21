@@ -112,5 +112,6 @@ int vmm_map_page(uint64_t *pml4, uint64_t vaddr, uint64_t paddr, uint64_t flags)
     uint64_t *pt = (uint64_t *)(pd[idx_pd] & ~0xFFF);
 
     pt[idx_pt] = paddr | flags;
+    __asm__ __volatile__("invlpg (%0)" :: "r"(vaddr) : "memory");
     return 0;
 }

@@ -1,3 +1,4 @@
+extern kernel_rsp_saved
 section .text
 bits 64
 
@@ -28,6 +29,11 @@ switch_to:
 
 global task_ret_to_user
 task_ret_to_user:
-    ; На стеке лежит фрейм: SS, RSP, RFLAGS, CS, RIP
-    ; Мы уже в Ring 0, стек ядра. iretq вернет нас в Ring 3.
     iretq
+
+; Вспомогательная функция для возврата из userland
+global exit_to_kernel
+exit_to_kernel:
+    mov rax, rdi            ; Код возврата в RAX
+    mov rsp, [kernel_rsp_saved]
+    ret

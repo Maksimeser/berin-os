@@ -1,10 +1,10 @@
-# Berin OS - Makefile (x86_64, Stage 1)
+# Berin - Makefile
 CC      := gcc
 AS      := nasm
 LD      := ld
 
 CFLAGS  := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
-	   -fno-pic -fno-pie -fno-omit-frame-pointer -mno-red-zone \
+	   -fno-pic -fno-pie  -mno-red-zone \
            -mno-mmx -mno-avx -mno-80387 -mgeneral-regs-only \
            -Wall -Wextra -O2 \
            -nostdlib -nostartfiles -nodefaultlibs \
