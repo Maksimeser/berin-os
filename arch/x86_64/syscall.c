@@ -101,14 +101,9 @@ static uint64_t sys_unlink(const char *path) {
 extern void exit_to_kernel(uint64_t code);
 
 static uint64_t sys_exit(uint64_t code) {
-    term_write("\n[user] exit(");
-    put_u64(code);
-    term_write(")\n");
-
-    if (code == 100) { reboot_now(); }
-    if (code == 101) { logoff_now(); }
-
-    exit_to_kernel(code);
+    if (code == 100) { extern void reboot_now(void); reboot_now(); }
+    if (code == 101) { extern void logoff_now(void); logoff_now(); }
+    task_exit((int)code);
     return 0;
 }
 
@@ -136,22 +131,21 @@ static uint64_t sys_spawn(const char *path) {
     }
     kfree(code);
 
+    // Выделяем стек для новой задачи
     void *stack_phys = pmm_alloc_page();
-    if (!stack_phys) return (uint64_t)-1;
     uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
     vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+
     uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
 
-    uint64_t old_cr3 = paging_get_cr3();
-    uint64_t saved_rsp = kernel_rsp_saved;
+    // Создаем задачу в планировщике
+    struct task *t = task_create(entry, new_pml4, user_rsp);
+    if (!t) return (uint64_t)-1;
 
-    vmm_switch_pml4(new_pml4);
-    uint64_t rc = enter_user_mode(entry, user_rsp);
+    // Переключаемся на нее (родитель засыпает до exit)
+    schedule();
 
-    vmm_switch_pml4((uint64_t *)old_cr3);
-    kernel_rsp_saved = saved_rsp;
-
-    return rc;
+    return 0;
 }
 
 /* ================= ДИСПЕТЧЕР ================= */

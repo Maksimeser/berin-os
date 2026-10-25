@@ -1,4 +1,5 @@
 extern kernel_rsp_saved
+
 section .text
 bits 64
 
@@ -18,7 +19,7 @@ switch_to:
     ; Загружаем RSP из next->kernel_rsp
     mov rsp, [rsi + 16]
 
-    ; Восстанавливаем регистры
+    ; Восстанавливаем регистры нового процесса
     pop r15
     pop r14
     pop r13
@@ -29,11 +30,13 @@ switch_to:
 
 global task_ret_to_user
 task_ret_to_user:
+    ; На вершине стека лежит iretq-фрейм
     iretq
 
-; Вспомогательная функция для возврата из userland
 global exit_to_kernel
 exit_to_kernel:
-    mov rax, rdi            ; Код возврата в RAX
+    mov rax, rdi
     mov rsp, [kernel_rsp_saved]
     ret
+
+section .note.GNU-stack noalloc noexec nowrite progbits

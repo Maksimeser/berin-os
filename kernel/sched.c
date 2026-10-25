@@ -3,13 +3,11 @@
 #include "pmm.h"
 #include "kstring.h"
 #include "vmm.h"
+#include "paging.h"
 
 struct task *current_task = 0;
 static struct task *task_list = 0;
 static uint32_t next_pid = 1;
-
-extern void task_ret_to_user(void);
-extern void exit_to_kernel(uint64_t code);
 
 void sched_init(void) {
     current_task = (struct task *)kmalloc(sizeof(struct task));
@@ -28,23 +26,22 @@ struct task *task_create(uint64_t entry, uint64_t *pml4, uint64_t user_rsp) {
     t->state = TASK_READY;
     t->pml4 = pml4;
 
-    // Выделяем ядерный стек (16 КБ)
     void *kstack = pmm_alloc_page();
     if (!kstack) return 0;
 
     uint64_t *sp = (uint64_t *)((uint64_t)kstack + 4096);
 
-    // 1. Фрейм для iretq (возврат в userland)
-    *--sp = 0x23;         // SS (user data)
-    *--sp = user_rsp;     // RSP (user)
-    *--sp = 0x202;        // RFLAGS (IF=1)
-    *--sp = 0x1B;         // CS (user code)
-    *--sp = entry;        // RIP (куда прыгнуть в userland)
+    // iretq frame (Ring 3)
+    *--sp = 0x23;         // SS
+    *--sp = user_rsp;     // RSP
+    *--sp = 0x202;        // RFLAGS
+    *--sp = 0x1B;         // CS
+    *--sp = entry;        // RIP
 
-    // 2. Возврат для switch_to (он сделает ret и прыгнет в task_ret_to_user)
+    // Возврат из switch_to для новой задачи
     *--sp = (uint64_t)task_ret_to_user;
 
-    // 3. Фейковый контекст для switch_to
+    // Фейковые регистры для switch_to
     *--sp = 0; // rbp
     *--sp = 0; // rbx
     *--sp = 0; // r12
@@ -70,8 +67,13 @@ void schedule(void) {
         next = next->next;
     }
 
-    // Если нет готовых задач, никуда не переключаемся
+    // Если нет других задач, остаемся здесь
     if (next == current_task) return;
+
+    // ВАЖНО: Помечаем текущую задачу как готовую к возобновлению!
+    if (prev->state == TASK_RUNNING) {
+        prev->state = TASK_READY;
+    }
 
     current_task = next;
     current_task->state = TASK_RUNNING;
@@ -83,6 +85,7 @@ void schedule(void) {
 }
 
 void task_exit(int code) {
+    (void)code;
     current_task->state = TASK_ZOMBIE;
 
     // Ищем, кому передать управление
@@ -95,9 +98,9 @@ void task_exit(int code) {
     }
 
     if (found) {
-        schedule(); // Уходим в другую задачу
+        schedule();
     } else {
-        // Нет задач, возвращаемся в kerbash
-        exit_to_kernel((uint64_t)code);
+        extern void exit_to_kernel(uint64_t code);
+        exit_to_kernel(0); // Выходим в kerbash
     }
 }

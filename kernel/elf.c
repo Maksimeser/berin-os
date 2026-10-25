@@ -4,7 +4,7 @@
 #include "kstring.h"
 
 int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry_out) {
-    (void)pml4; // Пока игнорируем VMM для прямого запуска
+    (void)pml4; // Игнорируем VMM, грузим прямо в текущую память
     if (size < sizeof(struct elf64_ehdr)) return -1;
     const struct elf64_ehdr *eh = (const struct elf64_ehdr *)data;
 
@@ -23,7 +23,7 @@ int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry
         uint64_t vaddr_end = ph->p_vaddr + ph->p_memsz;
 
         for (uint64_t vaddr = vaddr_start & ~0xFFFULL; vaddr < vaddr_end; vaddr += 4096) {
-            uint64_t phys = vaddr; // Identity map
+            uint64_t phys = vaddr; // Просто identity map
 
             uint64_t page_start = vaddr;
             uint64_t page_end = vaddr + 4096;
@@ -38,6 +38,7 @@ int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry
             }
         }
     }
+
     *entry_out = eh->e_entry;
     return 0;
 }
