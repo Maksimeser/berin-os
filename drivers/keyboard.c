@@ -1,4 +1,3 @@
-/* Berin OS - PS/2 keyboard (x86_64), scancode set 1 + modifiers */
 #include "keyboard.h"
 #include "io.h"
 
@@ -6,14 +5,15 @@
 #define KB_STATUS 0x64
 #define BUF_SIZE  256
 
-static const char map[128] = {
+static const char map_lower[128] = {
     0,   27,  '1','2','3','4','5','6','7','8','9','0','-','=','\b',
     '\t','q','w','e','r','t','y','u','i','o','p','[',']','\n',
     0,   'a','s','d','f','g','h','j','k','l',';','\'','`',
     0,   '\\','z','x','c','v','b','n','m',',','.','/',0,
     '*', 0,   ' ',
 };
-static const char map_shift[128] = {
+
+static const char map_upper[128] = {
     0,   27,  '!','@','#','$','%','^','&','*','(',')','_','+','\b',
     '\t','Q','W','E','R','T','Y','U','I','O','P','{','}','\n',
     0,   'A','S','D','F','G','H','J','K','L',':','"','~',
@@ -21,49 +21,44 @@ static const char map_shift[128] = {
     '*', 0,   ' ',
 };
 
-static int shift_down, ctrl_down, alt_down;
+static int shift_down = 0;
+static int caps_lock = 0;
 static char buf[BUF_SIZE];
 static volatile int head, tail;
 
 void kb_init(void) {
     while (inb(KB_STATUS) & 0x01) (void)inb(KB_DATA);
     head = tail = 0;
-    shift_down = ctrl_down = alt_down = 0;
+    shift_down = 0;
+    caps_lock = 0;
 }
 
 void kb_handler(void) {
     uint8_t sc = inb(KB_DATA);
 
-    /* release */
+    /* Отпускание клавиши */
     if (sc & 0x80) {
         uint8_t code = sc & 0x7F;
         if (code == 0x2A || code == 0x36) shift_down = 0;
-        if (code == 0x1D)                 ctrl_down  = 0;
-        if (code == 0x38)                 alt_down   = 0;
         return;
     }
 
-    /* modifiers */
+    /* Нажатие Shift */
     if (sc == 0x2A || sc == 0x36) { shift_down = 1; return; }
-    if (sc == 0x1D)               { ctrl_down  = 1; return; }
-    if (sc == 0x38)               { alt_down   = 1; return; }
 
-    char c = shift_down ? map_shift[sc] : map[sc];
+    /* Нажатие Caps Lock */
+    if (sc == 0x3A) { caps_lock = !caps_lock; return; }
+
+    /* Определяем, нужен ли верхний регистр */
+    int use_upper = 0;
+    if (sc >= 0x10 && sc <= 0x32) { // Буквы (q, w, e, r...)
+        use_upper = shift_down ^ caps_lock; // Если включен Shift или Caps -> большие
+    } else {
+        use_upper = shift_down; // Для цифр и символов только Shift
+    }
+
+    char c = use_upper ? map_upper[sc] : map_lower[sc];
     if (!c) return;
-
-    /* Ctrl combos — send control characters */
-    if (ctrl_down) {
-        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 1);   /* Ctrl+A=1 ... Ctrl+Z=26 */
-            else if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 1);
-    }
-
-    /* Ctrl+Alt+Del → reboot signal (0x03 as special) */
-    if (ctrl_down && alt_down && sc == 0x53) {
-        /* send 0xFF as "reboot request" */
-        int next = (head + 1) % BUF_SIZE;
-        if (next != tail) { buf[head] = (char)0xFF; head = next; }
-        return;
-    }
 
     int next = (head + 1) % BUF_SIZE;
     if (next != tail) { buf[head] = c; head = next; }

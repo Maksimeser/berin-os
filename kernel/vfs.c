@@ -199,7 +199,6 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       if (vfs_resolve(parent_path, &m, &parent_ino) != 0) return -3;
 
                                       struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
-
                                       uint32_t ino = berfs_alloc_inode(bm);
                                       if (ino == 0) return -4;
 
@@ -208,11 +207,13 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       in.i_mode = BERFS_TYPE_FILE | 0644;
                                       in.i_size = 0;
                                       in.i_links_count = 1;
-                                      berfs_write_inode(bm, ino, &in);
+
+                                      if (berfs_write_inode(bm, ino, &in) != 0) return -5;
 
                                       struct berfs_inode parent;
-                                      berfs_read_inode(bm, parent_ino, &parent);
-                                      berfs_dir_add(bm, &parent, parent_ino, name, ino, BERFS_DT_FILE);
+                                      if (berfs_read_inode(bm, parent_ino, &parent) != 0) return -1;
+                                      if (berfs_dir_add(bm, &parent, parent_ino, name, ino, BERFS_DT_FILE) != 0) return -5;
+
                                       return 0;
                                   }
 
@@ -228,7 +229,6 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       if (vfs_resolve(parent_path, &m, &parent_ino) != 0) return -3;
 
                                       struct berfs_mount *bm = (struct berfs_mount *)m->fs_data;
-
                                       uint32_t ino = berfs_alloc_inode(bm);
                                       if (ino == 0) return -4;
 
@@ -238,13 +238,14 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
                                       new_dir.i_size = 0;
                                       new_dir.i_links_count = 2;
 
-                                      berfs_dir_add(bm, &new_dir, ino, ".", ino, BERFS_DT_DIR);
-                                      berfs_dir_add(bm, &new_dir, ino, "..", parent_ino, BERFS_DT_DIR);
-                                      berfs_write_inode(bm, ino, &new_dir);
+                                      if (berfs_dir_add(bm, &new_dir, ino, ".", ino, BERFS_DT_DIR) != 0) return -5;
+                                      if (berfs_dir_add(bm, &new_dir, ino, "..", parent_ino, BERFS_DT_DIR) != 0) return -5;
+                                      if (berfs_write_inode(bm, ino, &new_dir) != 0) return -5;
 
                                       struct berfs_inode parent;
-                                      berfs_read_inode(bm, parent_ino, &parent);
-                                      berfs_dir_add(bm, &parent, parent_ino, name, ino, BERFS_DT_DIR);
+                                      if (berfs_read_inode(bm, parent_ino, &parent) != 0) return -1;
+                                      if (berfs_dir_add(bm, &parent, parent_ino, name, ino, BERFS_DT_DIR) != 0) return -5;
+
                                       return 0;
                                   }
 

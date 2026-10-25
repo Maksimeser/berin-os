@@ -9,8 +9,6 @@
 #include "vfs.h"
 #include "gdt.h"
 #include "paging.h"
-#include <stdint.h>
-#include <stddef.h>
 #include "sched.h"
 #include "idt.h"
 #include "elf.h"
@@ -18,6 +16,8 @@
 #include "pic.h"
 #include "pit.h"
 #include "keyboard.h"
+#include <stdint.h>
+#include <stddef.h>
 
 /* ============================================================
  *  Port I/O
@@ -125,7 +125,6 @@ static void term_emit(char c) {
     }
 
     if (term_col >= VGA_WIDTH) { term_col = 0; term_row++; }
-
     if (term_row >= VGA_HEIGHT) term_scroll();
 
     if (c == '\n') serial_write_char('\r');
@@ -144,26 +143,8 @@ static void term_emit(char c) {
 static int ansi_state = 0;
 static int ansi_param = 0;
 
-static const uint8_t ansi_to_vga[8] = {
-    0,  /* 30 black   -> VGA 0 */
-    4,  /* 31 red     -> VGA 4 */
-    2,  /* 32 green   -> VGA 2 */
-    6,  /* 33 yellow  -> VGA 6 */
-    1,  /* 34 blue    -> VGA 1 */
-    5,  /* 35 magenta -> VGA 5 */
-    3,  /* 36 cyan    -> VGA 3 */
-    7,  /* 37 white   -> VGA 7 */
-};
-static const uint8_t ansi_to_vga_bright[8] = {
-    8,   /* 90 br.black   -> VGA 8  (dark gray)   */
-    12,  /* 91 br.red     -> VGA 12 (light red)   */
-    10,  /* 92 br.green   -> VGA 10 (light green) */
-    14,  /* 93 br.yellow  -> VGA 14 (yellow)      */
-    9,   /* 94 br.blue    -> VGA 9  (light blue)  */
-    13,  /* 95 br.magenta -> VGA 13 (light magenta)*/
-    11,  /* 96 br.cyan    -> VGA 11 (light cyan)  */
-    15,  /* 97 br.white   -> VGA 15 (white)       */
-};
+static const uint8_t ansi_to_vga[8] = { 0, 4, 2, 6, 1, 5, 3, 7 };
+static const uint8_t ansi_to_vga_bright[8] = { 8, 12, 10, 14, 9, 13, 11, 15 };
 
 static void ansi_sgr(int p) {
     if (p == 0)                    term_reset_color();
@@ -198,14 +179,12 @@ void term_write(const char *s) {
 }
 
 /* ============================================================
- *  Timer tick counter (IRQ0)
+ *  Timer, Input
  * ============================================================ */
 static volatile uint64_t ticks = 0;
 void timer_tick(void) { ticks++; }
 uint64_t get_ticks(void) { return ticks; }
-/* ============================================================
- *  Input: keyboard (QEMU window) + serial (host terminal)
- * ============================================================ */
+
 static char input_getchar(void) {
     for (;;) {
         if (kb_ready())        return kb_getchar();
@@ -213,11 +192,10 @@ static char input_getchar(void) {
         __asm__ __volatile__("pause");
     }
 }
-
 char berin_input_getchar(void) { return input_getchar(); }
 
 /* ============================================================
- *  kerbash
+ *  Helpers
  * ============================================================ */
 #define MAX_LINE 256
 #define MAX_ARGS 16
@@ -254,6 +232,9 @@ static int tokenize(char *s, char **argv, int max) {
     return argc;
 }
 
+/* ============================================================
+ *  Reboot/Logoff
+ * ============================================================ */
 void reboot_now(void) {
     while (inb(0x64) & 0x02) ;
     outb(0x64, 0xFE);
@@ -271,6 +252,9 @@ void logoff_now(void) {
     for (;;) __asm__ __volatile__("cli; hlt");
 }
 
+/* ============================================================
+ *  kerbash Builtins
+ * ============================================================ */
 static int builtin_echo(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (i > 1) term_putchar(' ');
@@ -281,20 +265,20 @@ static int builtin_echo(int argc, char **argv) {
 }
 
 static int builtin_help(int argc, char **argv) {
-    (void)argc; (void)argv;
     if (argc >= 2 && str_eq(argv[1], "d-")) {
-        term_write("kerbash 0.2 - debug/destructive:\n");
+        term_write("kerbash 0.3 - debug/destructive:\n");
         term_write("  crash         trigger divide error\n");
         term_write("  pf            trigger page fault\n");
         term_write("  halt          halt CPU\n");
+        term_write("  vmtest        test VMM (create PML4, map page)\n");
         term_write("  kmtest        kmalloc/kfree round-trip\n");
-        term_write("  atatest       ATA read/write test (sector 100)\n");
         term_write("  memtest       alloc 3 pages, free, verify\n");
+        term_write("  atatest       ATA read/write test (sector 100)\n");
         return 0;
     }
-    term_write("kerbash 0.2 - builtins:\n");
+    term_write("kerbash 0.3 - builtins:\n");
     term_write("  echo <args>   print arguments\n");
-    term_write("  help          this message\n");
+    term_write("  help [d-]     this message (d- for debug)\n");
     term_write("  clear         clear screen\n");
     term_write("  about         about Berin OS\n");
     term_write("  versi         show versions\n");
@@ -302,22 +286,17 @@ static int builtin_help(int argc, char **argv) {
     term_write("  bls           list root directory\n");
     term_write("  bcat <name>   print file contents\n");
     term_write("  elf <name>    load ELF from disk and run\n");
-    term_write("  vmtest        test VMM (create PML4, map page)\n");
+    term_write("  disks         list block devices (dsk000)\n");
     term_write("  uptime        ticks since boot\n");
-    term_write("  crash         trigger divide error\n");
-    term_write("  pf            trigger page fault\n");
     term_write("  bread         read BerFS superblock from disk\n");
-    term_write("  halt          halt CPU\n");
     term_write("  ata           ATA drive info\n");
-    term_write("  atatest       ATA read/write test (sector 100)\n");
     term_write("  whoami        print current user\n");
     term_write("  meminfo       physical memory summary\n");
-    term_write("  memtest       alloc 3 pages, free, verify\n");
     term_write("  paging        paging status (CR3, CR2)\n");
     term_write("  reboot        reboot machine\n");
     term_write("  heap          kernel heap usage\n");
-    term_write("  kmtest        kmalloc/kfree round-trip\n");
     term_write("  logoff        shut down (ACPI)\n");
+    term_write("  \033[90m(for debug tools type 'help d-')\033[0m\n");
     return 0;
 }
 
@@ -329,7 +308,7 @@ static int builtin_clear(int argc, char **argv) {
 
 static int builtin_about(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("Berin OS v0.0.2 (x86_64)\n");
+    term_write("Berin OS v0.0.3 (x86_64)\n");
     term_write("Berin. Your own system.\n");
     term_write("vendor: Turker Games\n");
     term_write("mascot: Sorsha, green fox\n");
@@ -338,9 +317,9 @@ static int builtin_about(int argc, char **argv) {
 
 static int builtin_versi(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("Berin OS 0.0.2 \"Sorsha\"\n");
-    term_write("  kernel   0.0.2   x86_64, long mode\n");
-    term_write("  kerbash  0.2     kernel shell\n");
+    term_write("Berin OS 0.0.3 \"Sorsha\"\n");
+    term_write("  kernel   0.0.3   x86_64, long mode\n");
+    term_write("  kerbash  0.3     kernel shell\n");
     term_write("  serial   0.1     COM1 115200 8N1\n");
     term_write("  keyboard 0.1     PS/2 scancode set 1\n");
     term_write("  idt/pic/pit 0.2  256 vectors, 100 Hz\n");
@@ -422,37 +401,27 @@ static int builtin_heap(int argc, char **argv) {
 static int builtin_kmtest(int argc, char **argv) {
     (void)argc; (void)argv;
     uint64_t before = heap_used();
-
     void *a = kmalloc(64);
     void *b = kmalloc(128);
     void *c = kmalloc(32);
-
     term_write("a=0x"); put_hex64((uint64_t)a); term_putchar('\n');
     term_write("b=0x"); put_hex64((uint64_t)b); term_putchar('\n');
     term_write("c=0x"); put_hex64((uint64_t)c); term_putchar('\n');
-
     if (a) { for (int i = 0; i < 64;  i++) ((uint8_t *)a)[i] = 0xAA; }
     if (b) { for (int i = 0; i < 128; i++) ((uint8_t *)b)[i] = 0xBB; }
     if (c) { for (int i = 0; i < 32;  i++) ((uint8_t *)c)[i] = 0xCC; }
-
-    kfree(b);
-    kfree(a);
-    kfree(c);
-
+    kfree(b); kfree(a); kfree(c);
     uint64_t after = heap_used();
     if (after == before) term_write("heap restored: OK\n");
     else                 term_write("heap MISMATCH\n");
     return 0;
 }
 
-extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
-
 static int builtin_meminfo(int argc, char **argv) {
     (void)argc; (void)argv;
     uint64_t total = pmm_total_pages();
     uint64_t free_ = pmm_free_pages();
     uint64_t used  = pmm_used_pages();
-
     term_write("physical memory (4K pages):\n");
     term_write("  total: "); put_u64(total); term_write(" pages = "); put_u64(total * 4 / 1024); term_write(" MB\n");
     term_write("  used:  "); put_u64(used);  term_write(" pages = "); put_u64(used  * 4 / 1024); term_write(" MB\n");
@@ -463,19 +432,13 @@ static int builtin_meminfo(int argc, char **argv) {
 static int builtin_memtest(int argc, char **argv) {
     (void)argc; (void)argv;
     uint64_t before = pmm_free_pages();
-
     void *a = pmm_alloc_page();
     void *b = pmm_alloc_page();
     void *c = pmm_alloc_page();
-
     term_write("a=0x"); put_hex64((uint64_t)a); term_putchar('\n');
     term_write("b=0x"); put_hex64((uint64_t)b); term_putchar('\n');
     term_write("c=0x"); put_hex64((uint64_t)c); term_putchar('\n');
-
-    pmm_free_page(b);
-    pmm_free_page(a);
-    pmm_free_page(c);
-
+    pmm_free_page(b); pmm_free_page(a); pmm_free_page(c);
     uint64_t after = pmm_free_pages();
     if (after == before) term_write("free pages restored: OK\n");
     else                 term_write("free pages MISMATCH\n");
@@ -485,12 +448,9 @@ static int builtin_memtest(int argc, char **argv) {
 static int builtin_paging(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("paging:\n");
-    term_write("  enabled : ");
-    term_write(paging_enabled() ? "yes" : "no");
-    term_putchar('\n');
+    term_write("  enabled : "); term_write(paging_enabled() ? "yes" : "no"); term_putchar('\n');
     term_write("  CR3     : 0x"); put_hex64(paging_get_cr3()); term_putchar('\n');
     term_write("  CR2     : 0x"); put_hex64(paging_get_cr2()); term_putchar('\n');
-
     volatile uint64_t *probe = (volatile uint64_t *)0x100000;
     uint64_t v = *probe;
     term_write("  probe[0x100000] = 0x"); put_hex64(v); term_putchar('\n');
@@ -507,14 +467,9 @@ static int builtin_halt(int argc, char **argv) {
 
 static int builtin_bread(int argc, char **argv) {
     (void)argc; (void)argv;
-
     static uint8_t buf[4096];
-    if (bdev_read(1, buf) != 0) {
-        term_write("[ FAIL ] bdev_read\n");
-        return 0;
-    }
+    if (bdev_read(1, buf) != 0) { term_write("[ FAIL ] bdev_read\n"); return 0; }
     struct berfs_superblock *sb = (struct berfs_superblock *)buf;
-
     term_write("[ OK ] read block 1\n");
     term_write("  magic:   0x"); put_hex64(sb->sb_magic); term_putchar('\n');
     term_write("  version: ");   put_u64(sb->sb_version); term_putchar('\n');
@@ -522,11 +477,8 @@ static int builtin_bread(int argc, char **argv) {
     term_write("  inodes:  ");   put_u64(sb->sb_total_inodes); term_putchar('\n');
     term_write("  free blk:");   put_u64(sb->sb_free_blocks); term_putchar('\n');
     term_write("  free ino:");   put_u64(sb->sb_free_inodes); term_putchar('\n');
-
-    if (sb->sb_magic == BERFS_MAGIC)
-        term_write("  BerFS: OK\n");
-    else
-        term_write("  BerFS: bad magic\n");
+    if (sb->sb_magic == BERFS_MAGIC) term_write("  BerFS: OK\n");
+    else term_write("  BerFS: bad magic\n");
     return 0;
 }
 
@@ -564,9 +516,10 @@ static int builtin_bcat(int argc, char **argv) {
     return 0;
 }
 
+extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
+
 static int builtin_elf(int argc, char **argv) {
     if (argc < 2) { term_write("usage: elf <path>\n"); return 0; }
-
     uint32_t size;
     uint8_t  type;
     if (vfs_stat(argv[1], &size, &type) != 0) {
@@ -576,35 +529,26 @@ static int builtin_elf(int argc, char **argv) {
     if (type != VFS_FILE || size == 0 || size > 64*1024) {
         term_write("[ FAIL ] bad file\n"); return 0;
     }
-
     void *code = kmalloc(size);
     if (!code) { term_write("[ FAIL ] kmalloc\n"); return 0; }
-
     int fd = vfs_open(argv[1], O_RDONLY);
     if (fd < 0) { kfree(code); term_write("[ FAIL ] open\n"); return 0; }
     if (vfs_read(fd, code, size) != (int)size) {
         vfs_close(fd); kfree(code); term_write("[ FAIL ] read\n"); return 0;
     }
     vfs_close(fd);
-
     void *stack = pmm_alloc_page();
     if (!stack) { kfree(code); term_write("[ FAIL ] stack\n"); return 0; }
-
     uint64_t entry = 0;
     if (elf_load(code, size, (uint64_t *)paging_get_cr3(), &entry) != 0) {
         kfree(code); term_write("[ FAIL ] elf_load\n"); return 0;
     }
-
-    term_write("[ OK ] loaded from VFS, entry=0x");
-    put_hex64(entry); term_putchar('\n');
+    term_write("[ OK ] loaded from VFS, entry=0x"); put_hex64(entry); term_putchar('\n');
     term_write("[ elf ] entering ring 3...\n");
-
     uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
-
     uint64_t rc = enter_user_mode(entry, user_rsp);
     term_write("[elf] user returned, code=");
-    put_u64(rc);
-    term_putchar('\n');
+    put_u64(rc); term_putchar('\n');
     return 0;
 }
 
@@ -612,30 +556,28 @@ static int builtin_vmtest(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ vmm ] creating new PML4...\n");
     uint64_t *new_cr3 = vmm_create_pml4();
-    if (!new_cr3) {
-        term_write("[ FAIL ] pmm_alloc_page\n");
-        return 0;
-    }
-
+    if (!new_cr3) { term_write("[ FAIL ] pmm_alloc_page\n"); return 0; }
     term_write("  new CR3: 0x"); put_hex64((uint64_t)new_cr3); term_putchar('\n');
-
     uint64_t phys = vmm_get_phys(new_cr3, 0x100000);
     term_write("  virt 0x100000 -> phys 0x"); put_hex64(phys); term_putchar('\n');
-
     term_write("[ vmm ] mapping user page at 0x400000...\n");
     void *user_phys = pmm_alloc_page();
     if (!user_phys) { term_write("  [FAIL] alloc\n"); return 0; }
-
     vmm_map_page(new_cr3, 0x400000, (uint64_t)user_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
-
     uint64_t user_phys2 = vmm_get_phys(new_cr3, 0x400000);
     term_write("  virt 0x400000 -> phys 0x"); put_hex64(user_phys2); term_putchar('\n');
+    if (user_phys2 == (uint64_t)user_phys) term_write("[ OK ] VMM works!\n");
+    else term_write("[ FAIL ] mapping mismatch\n");
+    return 0;
+}
 
-    if (user_phys2 == (uint64_t)user_phys) {
-        term_write("[ OK ] VMM works!\n");
-    } else {
-        term_write("[ FAIL ] mapping mismatch\n");
-    }
+static int builtin_disks(int argc, char **argv) {
+    (void)argc; (void)argv;
+    term_write("[ SYSTEM DISKS ]\n");
+    term_write("  dsk000 (sd*):\n");
+    term_write("    model:   "); term_write(ata_model()); term_putchar('\n');
+    term_write("    sectors: "); put_u64(ata_sector_count()); term_putchar('\n');
+    term_write("    size:    "); put_u64(ata_sector_count() * 512 / 1024 / 1024); term_write(" MB\n");
     return 0;
 }
 
@@ -650,30 +592,20 @@ static int builtin_ata(int argc, char **argv) {
     (void)argc; (void)argv;
     int rc = ata_init();
     if (rc != 0) {
-        term_write("[ FAIL ] ata_init: ");
-        put_u64((uint64_t)rc);
-        term_putchar('\n');
+        term_write("[ FAIL ] ata_init: "); put_u64((uint64_t)rc); term_putchar('\n');
         return 0;
     }
-    term_write("[ OK ] ata: ");
-    term_write(ata_model());
-    term_write("\n  sectors: ");
-    put_u64(ata_sector_count());
-    term_write("  (");
-    put_u64(ata_sector_count() * 512 / 1024 / 1024);
-    term_write(" MB)\n");
+    term_write("[ OK ] ata: "); term_write(ata_model());
+    term_write("\n  sectors: "); put_u64(ata_sector_count());
+    term_write("  ("); put_u64(ata_sector_count() * 512 / 1024 / 1024); term_write(" MB)\n");
     return 0;
 }
 
 static int builtin_atatest(int argc, char **argv) {
     (void)argc; (void)argv;
     static uint8_t buf[512];
-
     term_write("[ ata ] reading sector 0...\n");
-    if (ata_read_sectors(0, 1, buf) != 0) {
-        term_write("[ FAIL ] read\n");
-        return 0;
-    }
+    if (ata_read_sectors(0, 1, buf) != 0) { term_write("[ FAIL ] read\n"); return 0; }
     term_write("  first 16 bytes: ");
     for (int i = 0; i < 16; i++) {
         term_putchar("0123456789ABCDEF"[(buf[i] >> 4) & 0xF]);
@@ -681,26 +613,14 @@ static int builtin_atatest(int argc, char **argv) {
         term_putchar(' ');
     }
     term_putchar('\n');
-
-    /* write test */
     for (int i = 0; i < 512; i++) buf[i] = (uint8_t)(i & 0xFF);
-    if (ata_write_sectors(100, 1, buf) != 0) {
-        term_write("[ FAIL ] write\n");
-        return 0;
-    }
+    if (ata_write_sectors(100, 1, buf) != 0) { term_write("[ FAIL ] write\n"); return 0; }
     term_write("[ OK ] wrote sector 100\n");
-
-    /* read back */
     static uint8_t buf2[512];
-    if (ata_read_sectors(100, 1, buf2) != 0) {
-        term_write("[ FAIL ] read back\n");
-        return 0;
-    }
+    if (ata_read_sectors(100, 1, buf2) != 0) { term_write("[ FAIL ] read back\n"); return 0; }
     for (int i = 0; i < 512; i++) {
         if (buf2[i] != (uint8_t)(i & 0xFF)) {
-            term_write("[ FAIL ] mismatch at ");
-            put_u64((uint64_t)i);
-            term_putchar('\n');
+            term_write("[ FAIL ] mismatch at "); put_u64((uint64_t)i); term_putchar('\n');
             return 0;
         }
     }
@@ -714,37 +634,41 @@ static int builtin_whoami(int argc, char **argv) {
     return 0;
 }
 
+/* ============================================================
+ *  Shell Loop
+ * ============================================================ */
 struct builtin {
     const char *name;
     int (*fn)(int argc, char **argv);
 };
 
 static struct builtin builtins[] = {
-    { "echo",   builtin_echo   },
-    { "help",   builtin_help   },
-    { "clear",  builtin_clear  },
-    { "about",  builtin_about  },
-    { "versi",  builtin_versi  },
-    { "colors", builtin_colors },
-    { "bls",   builtin_bls   },
-    { "vmtest", builtin_vmtest },
-    { "bcat",  builtin_bcat  },
-    { "elf",   builtin_elf   },
-    { "uptime", builtin_uptime },
-    { "bread", builtin_bread },
+    { "echo",    builtin_echo    },
+    { "help",    builtin_help    },
+    { "clear",   builtin_clear   },
+    { "about",   builtin_about   },
+    { "versi",   builtin_versi   },
+    { "colors",  builtin_colors  },
+    { "bls",     builtin_bls     },
+    { "bcat",    builtin_bcat    },
+    { "elf",     builtin_elf     },
+    { "vmtest",  builtin_vmtest  },
+    { "uptime",  builtin_uptime  },
+    { "bread",   builtin_bread   },
+    { "disks",   builtin_disks   },
     { "ata",     builtin_ata     },
     { "atatest", builtin_atatest },
-    { "crash",  builtin_crash  },
-    { "pf",     builtin_pf     },
-    { "reboot", builtin_reboot },
+    { "crash",   builtin_crash   },
+    { "pf",      builtin_pf      },
+    { "reboot",  builtin_reboot  },
     { "heap",    builtin_heap    },
     { "kmtest",  builtin_kmtest  },
-    { "halt",   builtin_halt   },
+    { "halt",    builtin_halt    },
     { "meminfo", builtin_meminfo },
-    { "whoami", builtin_whoami },
+    { "whoami",  builtin_whoami  },
     { "memtest", builtin_memtest },
     { "paging",  builtin_paging  },
-    { "logoff", builtin_logoff },
+    { "logoff",  builtin_logoff  },
     { 0, 0 },
 };
 
@@ -818,7 +742,6 @@ void kernel_main(void) {
         cr0 &= ~(1ULL << 2);
         cr0 |=  (1ULL << 1);
         __asm__ __volatile__("mov %0, %%cr0" :: "r"(cr0));
-
         __asm__ __volatile__("mov %%cr4, %0" : "=r"(cr4));
         cr4 |= (1ULL << 9) | (1ULL << 10);
         __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4));
@@ -832,11 +755,10 @@ void kernel_main(void) {
     heap_init();
     vfs_init();
     bdev_init();
-int mrc = berfs_mount_fs(&g_root);
+
+    int mrc = berfs_mount_fs(&g_root);
     if (mrc != 0) {
-        term_write("[ WARN ] berfs mount: ");
-        put_u64((uint64_t)mrc);
-        term_putchar('\n');
+        term_write("[ WARN ] berfs mount: "); put_u64((uint64_t)mrc); term_putchar('\n');
     }
     if (mrc == 0) {
         vfs_mount_berfs(&g_root);
@@ -860,14 +782,18 @@ int mrc = berfs_mount_fs(&g_root);
     term_write(" \\   \x1F   /\n");
     term_write("  \\_____/\n");
     term_write("\n");
-    term_write("Berin OS v0.0.2\n");
+    term_write("Berin OS v0.0.3\n");
     term_write("vendor: Turker Games\n");
     term_write("\n");
+    term_write("\033[91m [ BERIN KERNEL ]\n");
+    term_write(" Ring 0 | 64-bit | Unsafe\n");
+    term_write(" _  _  _  _  _\n");
+    term_write("| || || || || |\n");
+    term_write("|_||_||_||_||_|\033[0m\n\n");
 
     sched_init();
     kerbash_run();
 
     for (;;)
         __asm__ __volatile__("cli; hlt");
-
 }

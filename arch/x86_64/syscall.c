@@ -12,6 +12,8 @@ extern void term_write(const char *s);
 extern void term_putchar(char c);
 extern void reboot_now(void);
 extern void logoff_now(void);
+extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
+extern uint64_t kernel_rsp_saved;
 
 static void put_u64(uint64_t v) {
     char r[24]; int ri = 0;
@@ -111,14 +113,51 @@ static uint64_t sys_exit(uint64_t code) {
 }
 
 static uint64_t sys_spawn(const char *path) {
-    (void)path;
-    return (uint64_t)-1;
+    if (!path) return (uint64_t)-1;
+
+    uint32_t size; uint8_t type;
+    if (vfs_stat(path, &size, &type) != 0) return (uint64_t)-1;
+
+    void *code = kmalloc(size);
+    if (!code) return (uint64_t)-1;
+
+    int fd = vfs_open(path, O_RDONLY);
+    if (fd < 0) { kfree(code); return (uint64_t)-1; }
+    vfs_read(fd, code, size);
+    vfs_close(fd);
+
+    uint64_t *new_pml4 = vmm_create_pml4();
+    if (!new_pml4) { kfree(code); return (uint64_t)-1; }
+
+    uint64_t entry = 0;
+    if (elf_load(code, size, new_pml4, &entry) != 0) {
+        kfree(code);
+        return (uint64_t)-1;
+    }
+    kfree(code);
+
+    void *stack_phys = pmm_alloc_page();
+    if (!stack_phys) return (uint64_t)-1;
+    uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
+    vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
+
+    uint64_t old_cr3 = paging_get_cr3();
+    uint64_t saved_rsp = kernel_rsp_saved;
+
+    vmm_switch_pml4(new_pml4);
+    uint64_t rc = enter_user_mode(entry, user_rsp);
+
+    vmm_switch_pml4((uint64_t *)old_cr3);
+    kernel_rsp_saved = saved_rsp;
+
+    return rc;
 }
 
 /* ================= ДИСПЕТЧЕР ================= */
 
 void syscall_dispatch(struct regs *r) {
-    __asm__ __volatile__("sti"); // Прерывания должны быть включены для работы с клавиатурой
+    __asm__ __volatile__("sti");
 
     uint64_t nr  = r->rax;
     uint64_t a1  = r->rdi;
@@ -135,10 +174,10 @@ void syscall_dispatch(struct regs *r) {
         case SYS_LISTDIR: ret = sys_listdir((const char *)a1, (uint32_t *)a2, (char *)a3, (uint32_t *)r->r10, (uint8_t *)r->r8); break;
         case 83:          ret = sys_mkdir((const char *)a1, a2);     break;
         case 87:          ret = sys_unlink((const char *)a1);        break;
-        case 57:          /* fork */ ret = (uint64_t)-1;             break; // Временно
-        case 59:          /* execve */ ret = (uint64_t)-1;           break; // Временно
+        case 57:          /* fork */ ret = (uint64_t)-1;             break;
+        case 59:          /* execve */ ret = (uint64_t)-1;           break;
         case 60:          sys_exit(a1);                              break;
-        case 61:          /* wait */ ret = 0;                        break; // Временно
+        case 61:          /* wait */ ret = 0;                        break;
         case 200:         ret = sys_spawn((const char *)a1);         break;
         default:          term_write("[sys] unknown syscall\n");     break;
     }
