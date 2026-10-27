@@ -60,22 +60,159 @@ int berfs_write_inode(struct berfs_mount *m, uint32_t ino, const struct berfs_in
     return rc;
 }
 
+/* =========================================================
+ * INDIRECT BLOCKS (BerFS 2.0 - до 4 ТБ на файл)
+ * ========================================================= */
+
+// Возвращает физический блок по индексу. Если create=1, выделяет память под таблицы.
+static uint32_t berfs_get_block(struct berfs_mount *m, struct berfs_inode *in, uint32_t block_idx, int create) {
+    uint32_t ptrs_per_block = BLOCK_SIZE / sizeof(uint32_t); // 1024
+
+    // 1. Прямые блоки (0 - 11)
+    if (block_idx < BERFS_DIRECT_BLOCKS) {
+        if (in->i_block[block_idx] == 0 && create) {
+            in->i_block[block_idx] = berfs_alloc_block(m);
+        }
+        return in->i_block[block_idx];
+    }
+    block_idx -= BERFS_DIRECT_BLOCKS;
+
+    // 2. Одинарный indirect (12 - 1035)
+    if (block_idx < ptrs_per_block) {
+        if (in->i_indirect == 0) {
+            if (!create) return 0;
+            in->i_indirect = berfs_alloc_block(m);
+            if (in->i_indirect == 0) return 0;
+            uint8_t *zero = kmalloc(BLOCK_SIZE);
+            if (zero) { memset(zero, 0, BLOCK_SIZE); bdev_write(in->i_indirect, zero); kfree(zero); }
+        }
+        uint8_t *buf = kmalloc(BLOCK_SIZE);
+        if (!buf) return 0;
+        bdev_read(in->i_indirect, buf);
+        uint32_t *ptrs = (uint32_t *)buf;
+        if (ptrs[block_idx] == 0 && create) {
+            ptrs[block_idx] = berfs_alloc_block(m);
+            bdev_write(in->i_indirect, buf);
+        }
+        uint32_t phys = ptrs[block_idx];
+        kfree(buf);
+        return phys;
+    }
+    block_idx -= ptrs_per_block;
+
+    // 3. Двойной indirect (1036 - 1049611)
+    if (block_idx < ptrs_per_block * ptrs_per_block) {
+        if (in->i_double_indirect == 0) {
+            if (!create) return 0;
+            in->i_double_indirect = berfs_alloc_block(m);
+            if (in->i_double_indirect == 0) return 0;
+            uint8_t *zero = kmalloc(BLOCK_SIZE);
+            if (zero) { memset(zero, 0, BLOCK_SIZE); bdev_write(in->i_double_indirect, zero); kfree(zero); }
+        }
+        uint32_t l1_idx = block_idx / ptrs_per_block;
+        uint32_t l2_idx = block_idx % ptrs_per_block;
+
+        uint8_t *buf1 = kmalloc(BLOCK_SIZE);
+        if (!buf1) return 0;
+        bdev_read(in->i_double_indirect, buf1);
+        uint32_t *ptrs1 = (uint32_t *)buf1;
+
+        if (ptrs1[l1_idx] == 0) {
+            if (!create) { kfree(buf1); return 0; }
+            ptrs1[l1_idx] = berfs_alloc_block(m);
+            bdev_write(in->i_double_indirect, buf1);
+            uint8_t *zero = kmalloc(BLOCK_SIZE);
+            if (zero) { memset(zero, 0, BLOCK_SIZE); bdev_write(ptrs1[l1_idx], zero); kfree(zero); }
+        }
+        uint32_t second_table = ptrs1[l1_idx];
+        kfree(buf1);
+
+        uint8_t *buf2 = kmalloc(BLOCK_SIZE);
+        if (!buf2) return 0;
+        bdev_read(second_table, buf2);
+        uint32_t *ptrs2 = (uint32_t *)buf2;
+        if (ptrs2[l2_idx] == 0 && create) {
+            ptrs2[l2_idx] = berfs_alloc_block(m);
+            bdev_write(second_table, buf2);
+        }
+        uint32_t phys = ptrs2[l2_idx];
+        kfree(buf2);
+        return phys;
+    }
+    block_idx -= ptrs_per_block * ptrs_per_block;
+
+    // 4. Тройной indirect (1049612 - 1073742859) -> до 4 ТБ
+    if (block_idx < ptrs_per_block * ptrs_per_block * ptrs_per_block) {
+        if (in->i_triple_indirect == 0) {
+            if (!create) return 0;
+            in->i_triple_indirect = berfs_alloc_block(m);
+            if (in->i_triple_indirect == 0) return 0;
+            uint8_t *zero = kmalloc(BLOCK_SIZE);
+            if (zero) { memset(zero, 0, BLOCK_SIZE); bdev_write(in->i_triple_indirect, zero); kfree(zero); }
+        }
+        uint32_t l1 = block_idx / (ptrs_per_block * ptrs_per_block);
+        uint32_t l2 = (block_idx / ptrs_per_block) % ptrs_per_block;
+        uint32_t l3 = block_idx % ptrs_per_block;
+
+        // Уровень 1
+        uint8_t *b1 = kmalloc(BLOCK_SIZE); bdev_read(in->i_triple_indirect, b1);
+        uint32_t *p1 = (uint32_t *)b1;
+        if (p1[l1] == 0) {
+            if (!create) { kfree(b1); return 0; }
+            p1[l1] = berfs_alloc_block(m); bdev_write(in->i_triple_indirect, b1);
+            uint8_t *zero = kmalloc(BLOCK_SIZE); memset(zero, 0, BLOCK_SIZE);
+            bdev_write(p1[l1], zero); kfree(zero);
+        }
+        uint32_t t2 = p1[l1]; kfree(b1);
+
+        // Уровень 2
+        uint8_t *b2 = kmalloc(BLOCK_SIZE); bdev_read(t2, b2);
+        uint32_t *p2 = (uint32_t *)b2;
+        if (p2[l2] == 0) {
+            if (!create) { kfree(b2); return 0; }
+            p2[l2] = berfs_alloc_block(m); bdev_write(t2, b2);
+            uint8_t *zero = kmalloc(BLOCK_SIZE); memset(zero, 0, BLOCK_SIZE);
+            bdev_write(p2[l2], zero); kfree(zero);
+        }
+        uint32_t t3 = p2[l2]; kfree(b2);
+
+        // Уровень 3
+        uint8_t *b3 = kmalloc(BLOCK_SIZE); bdev_read(t3, b3);
+        uint32_t *p3 = (uint32_t *)b3;
+        if (p3[l3] == 0 && create) {
+            p3[l3] = berfs_alloc_block(m); bdev_write(t3, b3);
+        }
+        uint32_t phys = p3[l3]; kfree(b3);
+        return phys;
+    }
+
+    return 0; // Файл больше 4 ТБ
+}
+
+/* =========================================================
+ * ЧТЕНИЕ И ЗАПИСЬ
+ * ========================================================= */
+
 static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                            uint32_t pos, void *dst, uint32_t len) {
     uint8_t *p = (uint8_t *)dst;
     uint32_t done = 0;
     uint8_t *buf = kmalloc(BLOCK_SIZE);
     if (!buf) return -1;
+
     while (done < len) {
         uint32_t bp = pos + done;
         if (bp >= in->i_size) { kfree(buf); return -1; }
         uint32_t bi = bp / BLOCK_SIZE;
         uint32_t off = bp % BLOCK_SIZE;
-        if (bi >= BERFS_DIRECT_BLOCKS) { kfree(buf); return -1; }
-        if (in->i_block[bi] == 0) { kfree(buf); return -1; }
+
+        // Читаем физический блок через таблицу (create = 0)
+        uint32_t block = berfs_get_block(m, (struct berfs_inode *)in, bi, 0);
+        if (block == 0) { kfree(buf); return -1; }
+
         uint32_t chunk = BLOCK_SIZE - off;
         if (chunk > len - done) chunk = len - done;
-        if (berfs_read_block(m, in->i_block[bi], buf) != 0) { kfree(buf); return -1; }
+        if (bdev_read(block, buf) != 0) { kfree(buf); return -1; }
         memcpy(p + done, buf + off, chunk);
         done += chunk;
     }
@@ -83,7 +220,6 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
     return 0;
                            }
 
-                           /* Публичная обёртка — её ждёт vfs.c! */
                            int berfs_file_read(struct berfs_mount *m, const struct berfs_inode *in,
                                                uint32_t pos, void *dst, uint32_t len) {
                                return file_read_bytes(m, in, pos, dst, len);
@@ -93,7 +229,7 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                     uint32_t pos, const void *src, uint32_t len) {
                                                    const uint8_t *p = (const uint8_t *)src;
                                                    uint32_t done = 0;
-                                                   uint8_t *buf  = kmalloc(BLOCK_SIZE);
+                                                   uint8_t *buf = kmalloc(BLOCK_SIZE);
                                                    uint8_t *zero = kmalloc(BLOCK_SIZE);
                                                    if (!buf || !zero) { kfree(buf); kfree(zero); return -1; }
                                                    memset(zero, 0, BLOCK_SIZE);
@@ -102,19 +238,19 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                        uint32_t bp = pos + done;
                                                        uint32_t blk_idx = bp / BLOCK_SIZE;
                                                        uint32_t off = bp % BLOCK_SIZE;
-                                                       if (blk_idx >= BERFS_DIRECT_BLOCKS) { kfree(buf); kfree(zero); return -1; }
+
+                                                       // Выделяем блок через таблицу (create = 1)
+                                                       uint32_t block = berfs_get_block(m, in, blk_idx, 1);
+                                                       if (block == 0) { kfree(buf); kfree(zero); return -1; }
+
                                                        uint32_t chunk = BLOCK_SIZE - off;
                                                        if (chunk > len - done) chunk = len - done;
 
-                                                       if (in->i_block[blk_idx] == 0) {
-                                                           uint32_t new_blk = berfs_alloc_block(m);
-                                                           if (new_blk == 0) { kfree(buf); kfree(zero); return -1; }
-                                                           in->i_block[blk_idx] = new_blk;
-                                                           bdev_write(new_blk, zero);
-                                                       }
-                                                       if (bdev_read(in->i_block[blk_idx], buf) != 0) { kfree(buf); kfree(zero); return -1; }
+                                                       // Читаем блок, чтобы не затереть старое (если пишем в середину)
+                                                       if (bdev_read(block, buf) != 0) memset(buf, 0, BLOCK_SIZE);
+
                                                        memcpy(buf + off, p + done, chunk);
-                                                       bdev_write(in->i_block[blk_idx], buf);
+                                                       if (bdev_write(block, buf) != 0) { kfree(buf); kfree(zero); return -1; }
                                                        done += chunk;
                                                    }
                                                    kfree(buf);
@@ -125,6 +261,10 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                    }
                                                    return 0;
                                                                     }
+
+                                                                    /* =========================================================
+                                                                     * АЛЛОКАЦИЯ И ОСВОБОЖДЕНИЕ
+                                                                     * ========================================================= */
 
                                                                     uint32_t berfs_alloc_block(struct berfs_mount *m) {
                                                                         uint8_t *buf = kmalloc(BLOCK_SIZE);
@@ -186,6 +326,10 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                         return 0;
                                                                     }
 
+                                                                    /* =========================================================
+                                                                     * ДИРЕКТОРИИ
+                                                                     * ========================================================= */
+
                                                                     int berfs_dir_next(struct berfs_mount *m, const struct berfs_inode *dir,
                                                                                        uint32_t *pos, uint32_t *ino, char *name, uint8_t *type) {
                                                                         while (*pos < dir->i_size) {
@@ -240,43 +384,6 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                                            return 0;
                                                                                                          }
 
-                                                                                                         int berfs_free_block(struct berfs_mount *m, uint32_t blk) {
-                                                                                                             if (blk < m->sb.sb_data_block || blk >= m->sb.sb_total_blocks) return -1;
-                                                                                                             uint8_t *buf = kmalloc(BLOCK_SIZE);
-                                                                                                             if (!buf) return -1;
-                                                                                                             uint32_t bitmap_start = m->sb.sb_block_bitmap_block;
-                                                                                                             uint32_t byte_idx = blk / 8;
-                                                                                                             uint32_t bit_idx = blk % 8;
-
-                                                                                                             berfs_read_block(m, bitmap_start + (byte_idx / BLOCK_SIZE), buf);
-                                                                                                             uint32_t off = byte_idx % BLOCK_SIZE;
-                                                                                                             buf[off] &= ~(1 << bit_idx);
-                                                                                                             bdev_write(bitmap_start + (byte_idx / BLOCK_SIZE), buf);
-
-                                                                                                             m->sb.sb_free_blocks++;
-                                                                                                             berfs_write_sb(m);
-                                                                                                             kfree(buf);
-                                                                                                             return 0;
-                                                                                                         }
-
-                                                                                                         int berfs_free_inode(struct berfs_mount *m, uint32_t ino) {
-                                                                                                             if (ino < 2 || ino >= m->sb.sb_total_inodes) return -1;
-                                                                                                             uint8_t *buf = kmalloc(BLOCK_SIZE);
-                                                                                                             if (!buf) return -1;
-                                                                                                             uint32_t bitmap_start = m->sb.sb_inode_bitmap_block;
-                                                                                                             uint32_t byte_idx = ino / 8;
-                                                                                                             uint32_t bit_idx = ino % 8;
-
-                                                                                                             berfs_read_block(m, bitmap_start, buf);
-                                                                                                             buf[byte_idx] &= ~(1 << bit_idx);
-                                                                                                             bdev_write(bitmap_start, buf);
-
-                                                                                                             m->sb.sb_free_inodes++;
-                                                                                                             berfs_write_sb(m);
-                                                                                                             kfree(buf);
-                                                                                                             return 0;
-                                                                                                         }
-
                                                                                                          int berfs_dir_remove(struct berfs_mount *m, struct berfs_inode *dir_inode,
                                                                                                                               uint32_t dir_ino, const char *name) {
                                                                                                              uint32_t pos = 0;
@@ -299,6 +406,43 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                                                                  pos += de.d_reclen;
                                                                                                              }
                                                                                                              return -2;
+                                                                                                                              }
+
+                                                                                                                              int berfs_free_block(struct berfs_mount *m, uint32_t blk) {
+                                                                                                                                  if (blk < m->sb.sb_data_block || blk >= m->sb.sb_total_blocks) return -1;
+                                                                                                                                  uint8_t *buf = kmalloc(BLOCK_SIZE);
+                                                                                                                                  if (!buf) return -1;
+                                                                                                                                  uint32_t bitmap_start = m->sb.sb_block_bitmap_block;
+                                                                                                                                  uint32_t byte_idx = blk / 8;
+                                                                                                                                  uint32_t bit_idx = blk % 8;
+
+                                                                                                                                  berfs_read_block(m, bitmap_start + (byte_idx / BLOCK_SIZE), buf);
+                                                                                                                                  uint32_t off = byte_idx % BLOCK_SIZE;
+                                                                                                                                  buf[off] &= ~(1 << bit_idx);
+                                                                                                                                  bdev_write(bitmap_start + (byte_idx / BLOCK_SIZE), buf);
+
+                                                                                                                                  m->sb.sb_free_blocks++;
+                                                                                                                                  berfs_write_sb(m);
+                                                                                                                                  kfree(buf);
+                                                                                                                                  return 0;
+                                                                                                                              }
+
+                                                                                                                              int berfs_free_inode(struct berfs_mount *m, uint32_t ino) {
+                                                                                                                                  if (ino < 2 || ino >= m->sb.sb_total_inodes) return -1;
+                                                                                                                                  uint8_t *buf = kmalloc(BLOCK_SIZE);
+                                                                                                                                  if (!buf) return -1;
+                                                                                                                                  uint32_t bitmap_start = m->sb.sb_inode_bitmap_block;
+                                                                                                                                  uint32_t byte_idx = ino / 8;
+                                                                                                                                  uint32_t bit_idx = ino % 8;
+
+                                                                                                                                  berfs_read_block(m, bitmap_start, buf);
+                                                                                                                                  buf[byte_idx] &= ~(1 << bit_idx);
+                                                                                                                                  bdev_write(bitmap_start, buf);
+
+                                                                                                                                  m->sb.sb_free_inodes++;
+                                                                                                                                  berfs_write_sb(m);
+                                                                                                                                  kfree(buf);
+                                                                                                                                  return 0;
                                                                                                                               }
 
                                                                                                                               int berfs_sync(struct berfs_mount *m) {

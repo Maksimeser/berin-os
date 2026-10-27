@@ -285,6 +285,7 @@ static int builtin_help(int argc, char **argv) {
     term_write("  versi         show versions\n");
     term_write("  colors        ANSI color demo\n");
     term_write("  bls           list root directory\n");
+    term_write("  fatls         list files in FAT32 root (dsk001)\n");
     term_write("  bcat <name>   print file contents\n");
     term_write("  elf <name>    load ELF from disk and run\n");
     term_write("  disks         list block devices (dsk000)\n");
@@ -624,6 +625,36 @@ static int builtin_fat(int argc, char **argv) {
     return 0;
 }
 
+
+static int builtin_fatls(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (fat32_init() != 0) {
+        term_write("[ FAIL ] fat32_init: cannot mount\n");
+        return 0;
+    }
+    fat32_ls();
+    return 0;
+}
+static int builtin_fatcat(int argc, char **argv) {
+    if (argc < 2) { term_write("usage: fatcat <FILE.TXT>\n"); return 0; }
+
+    if (fat32_init() != 0) {
+        term_write("[ FAIL ] fat32_init\n");
+        return 0;
+    }
+
+    char buf[256];
+    int n = fat32_read(argv[1], buf, sizeof(buf) - 1);
+
+    if (n < 0) {
+        term_write("[ FAIL ] file not found or read error\n");
+    } else {
+        buf[n] = '\0';
+        term_write(buf);
+        term_write("\n");
+    }
+    return 0;
+}
 static int builtin_reboot(int argc, char **argv) {
     (void)argc; (void)argv;
     term_write("[ INFO ] reboot: resetting\n");
@@ -703,10 +734,12 @@ static struct builtin builtins[] = {
     { "atatest", builtin_atatest },
     { "crash",   builtin_crash   },
     { "pf",      builtin_pf      },
+    { "fatls",   builtin_fatls   },
     { "reboot",  builtin_reboot  },
     { "heap",    builtin_heap    },
     { "kmtest",  builtin_kmtest  },
     { "fat",     builtin_fat     },
+    { "fatcat",  builtin_fatcat  },
     { "halt",    builtin_halt    },
     { "meminfo", builtin_meminfo },
     { "whoami",  builtin_whoami  },
@@ -807,6 +840,12 @@ void kernel_main(void) {
     if (mrc == 0) {
         vfs_mount_berfs(&g_root);
     }
+    if (fat32_init() == 0) {
+        vfs_mount_add("/mnt", fat32_get_root_cluster(), fat32_get_vfs_ops(), 0);
+        term_write("[ OK ] FAT32 mounted at /mnt\n");
+    } else {
+        term_write("[ FAIL ] FAT32 mount failed\n");
+    }
 
     pmm_init();
     idt_init();
@@ -837,12 +876,10 @@ void kernel_main(void) {
 
     sched_init();
     const char *init_paths[] = {
+        "/bin/berbash.elf",
         "/sbin/init",
         "/etc/init",
-        "/bin/init",
-        "/bin/berbash.elf", // Твой Berin OS (если хочешь сделать его главным)
-        "/berbash.elf",     // На случай, если он лежит в корне
-        "/bin/sh",          // Классический fallback
+        "/berbash.elf",
         0
     };
 

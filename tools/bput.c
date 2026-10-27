@@ -106,14 +106,68 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* add dirent to root */
-    if (berfs_dir_add(&fs, &root, BERFS_ROOT_INODE, name, ino, BERFS_DT_FILE) != 0) {
-        fprintf(stderr, "[ FAIL ] cannot add dir entry\n");
+    /* ---- ПАРСИМ ПУТЬ ---- */
+    char dir_path[256] = "/";
+    char file_name[256];
+
+    const char *last_slash = strrchr(name, '/');
+    if (last_slash) {
+        int dlen = last_slash - name;
+        if (dlen == 0) {
+            strcpy(dir_path, "/");
+        } else {
+            memcpy(dir_path, name, dlen);
+            dir_path[dlen] = '\0';
+        }
+        strcpy(file_name, last_slash + 1);
+    } else {
+        strcpy(dir_path, "/");
+        strcpy(file_name, name);
+    }
+
+    /* Находим родительскую директорию */
+    struct berfs_inode parent;
+    uint32_t parent_ino = BERFS_ROOT_INODE;
+
+    if (strcmp(dir_path, "/") != 0) {
+        // Ищем папку в корне
+        parent_ino = berfs_dir_lookup(&fs, &root, dir_path + 1); // пропускаем первый '/'
+        if (parent_ino == 0) {
+            fprintf(stderr, "[ FAIL ] no such directory: %s\n", dir_path);
+            berfs_inode_free(&fs, ino);
+            berfs_close(&fs);
+            free(data);
+            return 1;
+        }
+        if (berfs_read_inode(&fs, parent_ino, &parent) != 0) {
+            fprintf(stderr, "[ FAIL ] cannot read parent inode\n");
+            berfs_inode_free(&fs, ino);
+            berfs_close(&fs);
+            free(data);
+            return 1;
+        }
+    } else {
+        parent = root;
+    }
+
+    /* check name not already present */
+    if (berfs_dir_lookup(&fs, &parent, file_name) != 0) {
+        fprintf(stderr, "[ FAIL ] already_exists: %s\n", file_name);
+        berfs_close(&fs);
+        free(data);
+        return 1;
+    }
+
+    /* add dirent to parent dir */
+    if (berfs_dir_add(&fs, &parent, parent_ino, file_name, ino, BERFS_DT_FILE) != 0) {
+        fprintf(stderr, "[ FAIL ] cannot add dir entry to %s\n", dir_path);
         berfs_inode_free(&fs, ino);
         berfs_close(&fs);
         free(data);
         return 1;
     }
+
+    printf("[ OK ] put %s -> %s (%ld bytes, inode %u)\n", host_path, name, hsize, ino);
 
     printf("[ OK ] put %s -> %s (%ld bytes, inode %u)\n", host_path, name, hsize, ino);
 
