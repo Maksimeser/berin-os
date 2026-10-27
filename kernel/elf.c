@@ -4,7 +4,6 @@
 #include "kstring.h"
 
 int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry_out) {
-    (void)pml4; // Игнорируем VMM, грузим прямо в текущую память
     if (size < sizeof(struct elf64_ehdr)) return -1;
     const struct elf64_ehdr *eh = (const struct elf64_ehdr *)data;
 
@@ -19,11 +18,17 @@ int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry
         if (ph->p_type != PT_LOAD) continue;
         if (ph->p_filesz > ph->p_memsz) return -1;
 
-        uint64_t vaddr_start = ph->p_vaddr;
-        uint64_t vaddr_end = ph->p_vaddr + ph->p_memsz;
+        uint64_t vaddr_start = ph->p_vaddr & ~0xFFFULL;
+        uint64_t vaddr_end = (ph->p_vaddr + ph->p_memsz + 0xFFF) & ~0xFFFULL;
 
-        for (uint64_t vaddr = vaddr_start & ~0xFFFULL; vaddr < vaddr_end; vaddr += 4096) {
-            uint64_t phys = vaddr; // Просто identity map
+        for (uint64_t vaddr = vaddr_start; vaddr < vaddr_end; vaddr += 4096) {
+            void *phys_page = pmm_alloc_page();
+            if (!phys_page) return -1;
+
+            memset(phys_page, 0, 4096);
+
+            // Мапим с флагами User (0x07)
+            if (vmm_map_page(pml4, vaddr, (uint64_t)phys_page, 0x07) != 0) return -1;
 
             uint64_t page_start = vaddr;
             uint64_t page_end = vaddr + 4096;
@@ -33,12 +38,14 @@ int elf_load(const uint8_t *data, uint64_t size, uint64_t *pml4, uint64_t *entry
             if (copy_start < copy_end) {
                 uint64_t len = copy_end - copy_start;
                 uint64_t file_offset = ph->p_offset + (copy_start - ph->p_vaddr);
-                uint64_t phys_dst = phys + (copy_start - page_start);
+                uint64_t phys_dst = (uint64_t)phys_page + (copy_start - page_start);
                 memcpy((void *)phys_dst, data + file_offset, len);
             }
         }
     }
 
+    // ВОТ ОНА, РОДНАЯ! БЕЗ НЕЁ ENTRY = 0.
     *entry_out = eh->e_entry;
+
     return 0;
 }

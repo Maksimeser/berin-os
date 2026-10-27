@@ -15,14 +15,13 @@ extern void logoff_now(void);
 extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
 extern uint64_t kernel_rsp_saved;
 
-static void put_u64(uint64_t v) {
-    char r[24]; int ri = 0;
-    if (v == 0) { term_putchar('0'); return; }
-    while (v) { r[ri++] = '0' + (v % 10); v /= 10; }
-    while (ri) term_putchar(r[--ri]);
-}
-
 /* ================= ФАЙЛОВЫЕ СИСТЕМНЫЕ ВЫЗОВЫ ================= */
+
+static void put_hex64(uint64_t v) {
+    extern void term_putchar(char c);
+    for (int i = 60; i >= 0; i -= 4)
+        term_putchar("0123456789ABCDEF"[(v >> i) & 0xF]);
+}
 
 static uint64_t sys_write(uint64_t fd, const void *buf, uint64_t len) {
     if (fd == 1 || fd == 2) {
@@ -103,6 +102,11 @@ extern void exit_to_kernel(uint64_t code);
 static uint64_t sys_exit(uint64_t code) {
     if (code == 100) { extern void reboot_now(void); reboot_now(); }
     if (code == 101) { extern void logoff_now(void); logoff_now(); }
+    if (current_task && current_task->pid == 1) {
+        extern void term_write(const char *s);
+        term_write("\n[ FATAL ] init exited. System halted.\n");
+        for (;;) __asm__ __volatile__("cli; hlt");
+    }
     task_exit((int)code);
     return 0;
 }
@@ -129,22 +133,18 @@ static uint64_t sys_spawn(const char *path) {
         kfree(code);
         return (uint64_t)-1;
     }
-    kfree(code);
+    //kfree(code);
 
-    // Выделяем стек для новой задачи
     void *stack_phys = pmm_alloc_page();
     uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
-    vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, 0x07);
 
     uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
 
-    // Создаем задачу в планировщике
     struct task *t = task_create(entry, new_pml4, user_rsp);
     if (!t) return (uint64_t)-1;
 
-    // Переключаемся на нее (родитель засыпает до exit)
     schedule();
-
     return 0;
 }
 

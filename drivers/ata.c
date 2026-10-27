@@ -78,6 +78,7 @@ int ata_init(void) {
 int ata_read_sectors(uint32_t lba, uint8_t count, void *buf) {
     if (ata_wait_ready(0) != 0) return -1;
 
+    // 0xE0 = Primary Master
     outb(ATA_PRIMARY_IO + ATA_REG_DRIVE,    (uint8_t)(0xE0 | ((lba >> 24) & 0x0F)));
     outb(ATA_PRIMARY_IO + ATA_REG_FEAT,     0);
     outb(ATA_PRIMARY_IO + ATA_REG_SECCOUNT, count);
@@ -113,6 +114,32 @@ int ata_write_sectors(uint32_t lba, uint8_t count, const void *buf) {
         if (ata_wait_ready(1) != 0) return -2;
         for (int i = 0; i < 256; i++)
             outw(ATA_PRIMARY_IO + ATA_REG_DATA, *p++);
+    }
+    return 0;
+}
+
+int ata_read_slave(uint32_t lba, uint8_t count, void *buf) {
+    // 1. Выбираем Primary Slave (0xB0)
+    outb(ATA_PRIMARY_IO + ATA_REG_DRIVE, (uint8_t)(0xF0 | ((lba >> 24) & 0x0F)));
+    ata_io_wait(); // Ждем 400 нс, чтобы контроллер переключился
+
+    if (ata_wait_ready(0) != 0) return -1;
+
+    // 2. Отправляем команду READ SECTORS
+    outb(ATA_PRIMARY_IO + ATA_REG_FEAT,     0);
+    outb(ATA_PRIMARY_IO + ATA_REG_SECCOUNT, count);
+    outb(ATA_PRIMARY_IO + ATA_REG_LBA_LO,   (uint8_t)(lba & 0xFF));
+    outb(ATA_PRIMARY_IO + ATA_REG_LBA_MID,  (uint8_t)((lba >> 8) & 0xFF));
+    outb(ATA_PRIMARY_IO + ATA_REG_LBA_HI,   (uint8_t)((lba >> 16) & 0xFF));
+    outb(ATA_PRIMARY_IO + ATA_REG_CMD, 0x20);
+    ata_io_wait();
+
+    // 3. Читаем данные
+    uint16_t *p = (uint16_t *)buf;
+    for (int s = 0; s < count; s++) {
+        if (ata_wait_ready(1) != 0) return -2;
+        for (int i = 0; i < 256; i++)
+            *p++ = inw(ATA_PRIMARY_IO + ATA_REG_DATA);
     }
     return 0;
 }

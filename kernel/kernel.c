@@ -8,6 +8,7 @@
 #include "ata.h"
 #include "vfs.h"
 #include "gdt.h"
+#include "fat32.h"
 #include "paging.h"
 #include "sched.h"
 #include "idt.h"
@@ -520,35 +521,61 @@ extern uint64_t enter_user_mode(uint64_t entry, uint64_t user_rsp);
 
 static int builtin_elf(int argc, char **argv) {
     if (argc < 2) { term_write("usage: elf <path>\n"); return 0; }
-    uint32_t size;
-    uint8_t  type;
-    if (vfs_stat(argv[1], &size, &type) != 0) {
-        term_write("\033[91mnot_found: "); term_write(argv[1]); term_write("\033[0m\n");
-        return 0;
-    }
-    if (type != VFS_FILE || size == 0 || size > 64*1024) {
-        term_write("[ FAIL ] bad file\n"); return 0;
-    }
+
+    uint32_t size; uint8_t type;
+    if (vfs_stat(argv[1], &size, &type) != 0) { term_write("[ FAIL ] not found\n"); return 0; }
+    term_write("[ elf ] stat size: "); put_u64(size); term_putchar('\n');
+
     void *code = kmalloc(size);
     if (!code) { term_write("[ FAIL ] kmalloc\n"); return 0; }
+
     int fd = vfs_open(argv[1], O_RDONLY);
     if (fd < 0) { kfree(code); term_write("[ FAIL ] open\n"); return 0; }
-    if (vfs_read(fd, code, size) != (int)size) {
-        vfs_close(fd); kfree(code); term_write("[ FAIL ] read\n"); return 0;
+
+    int n = vfs_read(fd, code, size);
+    term_write("[ elf ] read returned: "); put_u64(n); term_putchar('\n');
+
+    if (n != (int)size) {
+        vfs_close(fd); kfree(code);
+        term_write("[ FAIL ] read mismatch\n");
+        return 0;
     }
     vfs_close(fd);
-    void *stack = pmm_alloc_page();
-    if (!stack) { kfree(code); term_write("[ FAIL ] stack\n"); return 0; }
-    uint64_t entry = 0;
-    if (elf_load(code, size, (uint64_t *)paging_get_cr3(), &entry) != 0) {
-        kfree(code); term_write("[ FAIL ] elf_load\n"); return 0;
+
+    term_write("[ elf ] first 16 bytes: ");
+    for (int i = 0; i < 16; i++) {
+        char hex[] = "0123456789ABCDEF";
+        term_putchar(hex[((uint8_t*)code)[i] >> 4]);
+        term_putchar(hex[((uint8_t*)code)[i] & 0xF]);
+        term_putchar(' ');
     }
-    term_write("[ OK ] loaded from VFS, entry=0x"); put_hex64(entry); term_putchar('\n');
-    term_write("[ elf ] entering ring 3...\n");
-    uint64_t user_rsp = (uint64_t)stack + 4096 - 16;
+    term_putchar('\n');
+
+    uint64_t *pml4 = (uint64_t *)paging_get_cr3();
+    uint64_t entry = 0;
+
+    int elf_ret = elf_load(code, size, pml4, &entry);
+    term_write("[ elf ] elf_load returned: "); put_u64(elf_ret); term_putchar('\n');
+    term_write("[ elf ] entry after load: 0x"); put_hex64(entry); term_putchar('\n');
+
+    if (elf_ret != 0) {
+        kfree(code);
+        term_write("[ FAIL ] elf_load\n");
+        return 0;
+    }
+    kfree(code);
+
+    void *stack_phys = pmm_alloc_page();
+    if (!stack_phys) { term_write("[ FAIL ] stack alloc\n"); return 0; }
+
+    uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
+    vmm_map_page(pml4, user_stack_vaddr, (uint64_t)stack_phys, PTE_PRESENT | PTE_WRITABLE | PTE_USER);
+    uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
+
+    term_write("[ elf ] entering ring 3 at 0x"); put_hex64(entry); term_putchar('\n');
+
     uint64_t rc = enter_user_mode(entry, user_rsp);
-    term_write("[elf] user returned, code=");
-    put_u64(rc); term_putchar('\n');
+    term_write("[ elf ] user returned, code="); put_u64(rc); term_putchar('\n');
     return 0;
 }
 
@@ -578,6 +605,22 @@ static int builtin_disks(int argc, char **argv) {
     term_write("    model:   "); term_write(ata_model()); term_putchar('\n');
     term_write("    sectors: "); put_u64(ata_sector_count()); term_putchar('\n');
     term_write("    size:    "); put_u64(ata_sector_count() * 512 / 1024 / 1024); term_write(" MB\n");
+    return 0;
+}
+
+static int builtin_fat(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int r = fat32_init();
+    if (r != 0) {
+        term_write("[ FAIL ] fat32_init: ");
+        if (r == -1)      term_write("no drive (hdb)\n");
+        else if (r == -2) term_write("read error (hdb)\n");
+        else if (r == -10) term_write("bad sector size\n");
+        else if (r == -11) term_write("not FAT32\n");
+        else { term_write("unknown ("); put_u64((uint64_t)(r < 0 ? -r : r)); term_write(")\n"); }
+        return 0;
+    }
+    fat32_info();
     return 0;
 }
 
@@ -663,6 +706,7 @@ static struct builtin builtins[] = {
     { "reboot",  builtin_reboot  },
     { "heap",    builtin_heap    },
     { "kmtest",  builtin_kmtest  },
+    { "fat",     builtin_fat     },
     { "halt",    builtin_halt    },
     { "meminfo", builtin_meminfo },
     { "whoami",  builtin_whoami  },
@@ -786,13 +830,75 @@ void kernel_main(void) {
     term_write("vendor: Turker Games\n");
     term_write("\n");
     term_write("\033[91m [ BERIN KERNEL ]\n");
-    term_write(" Ring 0 | 64-bit | Unsafe\n");
+    term_write(" 64-bit\n");
     term_write(" _  _  _  _  _\n");
     term_write("| || || || || |\n");
     term_write("|_||_||_||_||_|\033[0m\n\n");
 
     sched_init();
-    kerbash_run();
+    const char *init_paths[] = {
+        "/sbin/init",
+        "/etc/init",
+        "/bin/init",
+        "/bin/berbash.elf", // Твой Berin OS (если хочешь сделать его главным)
+        "/berbash.elf",     // На случай, если он лежит в корне
+        "/bin/sh",          // Классический fallback
+        0
+    };
+
+    const char *init_to_run = 0;
+    uint32_t init_size = 0;
+
+    for (int i = 0; init_paths[i]; i++) {
+        uint32_t size; uint8_t type;
+        if (vfs_stat(init_paths[i], &size, &type) == 0 && type == VFS_FILE) {
+            init_to_run = init_paths[i];
+            init_size = size;
+            break;
+        }
+    }
+
+    if (!init_to_run) {
+        term_write("[ FAIL ] No init found. Dropping to kerbash.\n");
+        kerbash_run();
+    } else {
+        term_write("[ init ] found: ");
+        term_write(init_to_run);
+        term_write("\n");
+
+        void *code = kmalloc(init_size);
+        int fd = vfs_open(init_to_run, O_RDONLY);
+        if (fd >= 0 && code) {
+            vfs_read(fd, code, init_size);
+            vfs_close(fd);
+
+            uint64_t *new_pml4 = vmm_create_pml4();
+            uint64_t entry = 0;
+            if (new_pml4 && elf_load(code, init_size, new_pml4, &entry) == 0) {
+                kfree(code);
+
+                void *stack_phys = pmm_alloc_page();
+                uint64_t user_stack_vaddr = 0x7FFFFFFFE000;
+                vmm_map_page(new_pml4, user_stack_vaddr, (uint64_t)stack_phys, 0x07);
+                uint64_t user_rsp = user_stack_vaddr + 4096 - 16;
+
+                struct task *t = task_create(entry, new_pml4, user_rsp);
+                if (t) {
+                    term_write("[ init ] started as PID 1\n");
+                    schedule(); // Прыгаем в Ring 3
+                } else {
+                    term_write("[ FAIL ] task_create failed\n");
+                }
+            } else {
+                term_write("[ FAIL ] elf_load failed\n");
+            }
+        } else {
+            term_write("[ FAIL ] cannot open init\n");
+        }
+
+        term_write("[ FAIL ] init crashed. Dropping to kerbash.\n");
+        kerbash_run();
+    }
 
     for (;;)
         __asm__ __volatile__("cli; hlt");

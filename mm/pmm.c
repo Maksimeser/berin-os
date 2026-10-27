@@ -15,14 +15,17 @@ static inline void bit_set(uint64_t i)   { bitmap[i >> 3] |=  (uint8_t)(1u << (i
 static inline void bit_clear(uint64_t i) { bitmap[i >> 3] &= (uint8_t)~(1u << (i & 7)); }
 static inline int  bit_get(uint64_t i)   { return (bitmap[i >> 3] >> (i & 7)) & 1u; }
 
+#define HEAP_SIZE_BYTES (1024 * 1024) // 1 MB, как в heap.c
+
 void pmm_init(void) {
     for (uint64_t i = 0; i < PMM_BITMAP_BYTES; i++) bitmap[i] = 0xFF;
 
     total_pages = PMM_MAX_PAGES;
     free_pages  = 0;
 
-    uint64_t kend = (uint64_t)_kernel_end;
-    uint64_t start_page = (kend + PAGE_SIZE - 1) / PAGE_SIZE;
+    // Защищаем всё до конца heap (ядро + .bss + .data + heap 4MB)
+    uint64_t heap_end = (uint64_t)_kernel_end + (4ULL * 1024ULL * 1024ULL);
+    uint64_t start_page = (heap_end + PAGE_SIZE - 1) / PAGE_SIZE;
 
     for (uint64_t p = start_page; p < total_pages; p++) {
         bit_clear(p);
