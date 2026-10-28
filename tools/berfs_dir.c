@@ -63,8 +63,11 @@ static int file_read_bytes(struct berfs_fs *fs, const struct berfs_inode *in,
                                                         if (file_read_bytes(fs, dir_inode, *pos, &de, sizeof(de)) != 0) return -1;
 
                                                         if (de.d_inode == 0 || de.d_reclen == 0) {
-                                                            /* corrupted or end — bail */
-                                                            return -1;
+                                                            // <--- БЫЛО: return -1;
+                                                            // <--- СТАЛО:
+                                                            if (de.d_reclen == 0) return -1; // если realen = 0, то это точно конец
+                                                            *pos += de.d_reclen;
+                                                            continue;
                                                         }
 
                                                         if (file_read_bytes(fs, dir_inode, *pos + sizeof(de),

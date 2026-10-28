@@ -150,6 +150,26 @@ static uint64_t sys_spawn(const char *path) {
 
 /* ================= ДИСПЕТЧЕР ================= */
 
+static uint64_t sys_read_noecho(void *buf, uint64_t len) {
+    extern char berin_input_getchar(void);
+    __asm__ __volatile__("sti");
+    uint8_t *p = (uint8_t *)buf;
+    uint64_t n = 0;
+    while (n < len - 1) {
+        char c = berin_input_getchar();
+        if (c == '\r' || c == '\n') { term_putchar('\n'); break; }
+        if (c == 0x7F || c == '\b') {
+            if (n > 0) { n--; term_putchar('\b'); term_putchar(' '); term_putchar('\b'); }
+            continue;
+        }
+        if ((unsigned char)c < 0x20) continue;
+        p[n++] = (uint8_t)c;
+        term_putchar('*');
+    }
+    p[n] = '\0';
+    return n;
+}
+
 void syscall_dispatch(struct regs *r) {
     __asm__ __volatile__("sti");
 
@@ -160,6 +180,7 @@ void syscall_dispatch(struct regs *r) {
     uint64_t ret = (uint64_t)-1;
 
     switch (nr) {
+        case 202:         ret = sys_read_noecho((void *)a1, a2);     break;
         case SYS_WRITE:   ret = sys_write(a1, (const void *)a2, a3); break;
         case SYS_OPEN:    ret = sys_open((const char *)a1, a2);      break;
         case SYS_READ:    ret = sys_read(a1, (void *)a2, a3);        break;

@@ -41,13 +41,16 @@ static inline void outw(uint16_t port, uint16_t val) {
 #define COM1 0x3F8
 
 static void serial_init(void) {
-    outb(COM1 + 1, 0x00);
-    outb(COM1 + 3, 0x80);
-    outb(COM1 + 0, 0x01);
-    outb(COM1 + 1, 0x00);
-    outb(COM1 + 3, 0x03);
-    outb(COM1 + 2, 0xC7);
-    outb(COM1 + 4, 0x0B);
+    // Закомментировали всё, чтобы проверить, не она ли вешает систему
+    /*
+     *   outb(COM1 + 1, 0x00);
+     *   outb(COM1 + 3, 0x80);
+     *   outb(COM1 + 0, 0x01);
+     *   outb(COM1 + 1, 0x00);
+     *   outb(COM1 + 3, 0x03);
+     *   outb(COM1 + 2, 0xC7);
+     *   outb(COM1 + 4, 0x0B);
+     */
 }
 static int  serial_tx_empty(void) { return inb(COM1 + 5) & 0x20; }
 static int  serial_rx_ready(void) { return inb(COM1 + 5) & 0x01; }
@@ -813,7 +816,14 @@ static void kerbash_run(void) {
  *  Entry
  * ============================================================ */
 void kernel_main(void) {
-    serial_init(); {
+    #define DBG(c) __asm__ __volatile__("outb %%al, %%dx" :: "a"(c), "d"(0xE9))
+
+    DBG('I');           // Вход в kernel_main
+
+    serial_init();
+    DBG('J');           // Serial OK
+
+    {
         uint64_t cr0, cr4;
         __asm__ __volatile__("mov %%cr0, %0" : "=r"(cr0));
         cr0 &= ~(1ULL << 2);
@@ -823,15 +833,19 @@ void kernel_main(void) {
         cr4 |= (1ULL << 9) | (1ULL << 10);
         __asm__ __volatile__("mov %0, %%cr4" :: "r"(cr4));
     }
+
     gdt_init();
+    DBG('K');           // GDT OK
 
     term_set_fg(C_LGREEN);
     term_set_bg(C_BLACK);
     term_clear();
+    DBG('L');           // VGA OK
 
     heap_init();
     vfs_init();
     bdev_init();
+    DBG('M');           // Heap/VFS/Bdev OK
 
     int mrc = berfs_mount_fs(&g_root);
     if (mrc != 0) {
@@ -840,14 +854,19 @@ void kernel_main(void) {
     if (mrc == 0) {
         vfs_mount_berfs(&g_root);
     }
+    DBG('N');           // BerFS mount OK
+
     if (fat32_init() == 0) {
         vfs_mount_add("/mnt", fat32_get_root_cluster(), fat32_get_vfs_ops(), 0);
         term_write("[ OK ] FAT32 mounted at /mnt\n");
     } else {
         term_write("[ FAIL ] FAT32 mount failed\n");
     }
+    DBG('O');           // FAT32 mount OK
 
     pmm_init();
+    DBG('P');           // PMM OK
+
     idt_init();
     pic_remap();
     pit_init(100);
@@ -855,6 +874,7 @@ void kernel_main(void) {
     pic_unmask(0);
     pic_unmask(1);
     __asm__ __volatile__("sti");
+    DBG('Q');           // IDT/PIC/PIT/KB OK, Interrupts ON
 
     term_write("Berin loaded!\n");
     term_write("Long mode: OK\n");
@@ -875,10 +895,13 @@ void kernel_main(void) {
     term_write("|_||_||_||_||_|\033[0m\n\n");
 
     sched_init();
+    DBG('R');           // Планировщик OK
+
     const char *init_paths[] = {
-        "/bin/berbash.elf",
         "/sbin/init",
-        "/etc/init",
+        "/bin/init",
+        "/bin/login.elf",
+        "/bin/berbash.elf",
         "/berbash.elf",
         0
     };
@@ -894,9 +917,11 @@ void kernel_main(void) {
             break;
         }
     }
+    DBG('S');           // Поиск init завершен
 
     if (!init_to_run) {
         term_write("[ FAIL ] No init found. Dropping to kerbash.\n");
+        DBG('T');       // Идем в kerbash
         kerbash_run();
     } else {
         term_write("[ init ] found: ");
@@ -908,6 +933,7 @@ void kernel_main(void) {
         if (fd >= 0 && code) {
             vfs_read(fd, code, init_size);
             vfs_close(fd);
+            DBG('U');   // Файл init прочитан в память
 
             uint64_t *new_pml4 = vmm_create_pml4();
             uint64_t entry = 0;
@@ -922,6 +948,7 @@ void kernel_main(void) {
                 struct task *t = task_create(entry, new_pml4, user_rsp);
                 if (t) {
                     term_write("[ init ] started as PID 1\n");
+                    DBG('V');   // Переключаемся на задачу
                     schedule(); // Прыгаем в Ring 3
                 } else {
                     term_write("[ FAIL ] task_create failed\n");

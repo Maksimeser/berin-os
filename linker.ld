@@ -1,6 +1,6 @@
 /* Berin OS - linker script (x86_64, PVH) */
-
 ENTRY(_start)
+ENTRY(_start_efi)
 
 PHDRS
 {

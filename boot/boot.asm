@@ -1,4 +1,5 @@
 ; Berin - x86_64 boot
+
 section .note.Xen progbits alloc noexec nowrite align=4
     align 4
     dd 4
@@ -14,6 +15,9 @@ bits 32
 global _start
 extern kernel_main
 
+; ==========================================
+; 32-BIT ENTRY (PVH / Multiboot / QEMU)
+; ==========================================
 _start:
     cli
     mov esp, stack_top
@@ -39,15 +43,15 @@ _start:
     jmp dword 0x08:long_mode_entry
 
 setup_paging:
-      mov eax, pdpt
+    mov eax, pdpt
     or  eax, 0x07
     mov [pml4], eax
     mov dword [pml4 + 4], 0
 
-    ; PDPT[0] -> PD
     mov eax, pd
     or  eax, 0x07
     mov [pdpt], eax
+    mov dword [pdpt + 4], 0
 
     xor ecx, ecx
 .fill_pd:
@@ -83,6 +87,109 @@ long_mode_entry:
     hlt
     jmp .hang
 
+; ==========================================
+; 64-BIT ENTRY (UEFI / turload)
+; ==========================================
+global _start_efi
+_start_efi:
+    cli
+    mov rsp, stack_top_64
+
+    ; --- ОТЛАДКА: 'A' ---
+    mov al, 'A'
+    out 0xE9, al
+
+    lgdt [gdt64_ptr]
+
+    ; --- ОТЛАДКА: 'B' ---
+    mov al, 'B'
+    out 0xE9, al
+
+    push 0x08
+    lea rax, [rel .reload_cs]
+    push rax
+    retfq
+
+.reload_cs:
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    ; --- ОТЛАДКА: 'C' ---
+    mov al, 'C'
+    out 0xE9, al
+
+    call setup_paging_64
+
+    ; --- ОТЛАДКА: 'D' ---
+    mov al, 'D'
+    out 0xE9, al
+
+    call kernel_main
+
+.hang_efi:
+    cli
+    hlt
+    jmp .hang_efi
+
+setup_paging_64:
+    ; --- ОТЛАДКА: 'E' ---
+    mov al, 'E'
+    out 0xE9, al
+
+    mov rdi, pml4_64
+    mov rcx, 512
+    xor rax, rax
+    rep stosq
+
+    mov rdi, pdpt_64
+    mov rcx, 512
+    xor rax, rax
+    rep stosq
+
+    mov rdi, pd_64
+    mov rcx, 512
+    xor rax, rax
+    rep stosq
+
+    ; --- ОТЛАДКА: 'F' ---
+    mov al, 'F'
+    out 0xE9, al
+
+    mov rax, pdpt_64
+    or  rax, 0x07
+    mov [pml4_64], rax
+
+    mov rax, pd_64
+    or  rax, 0x07
+    mov [pdpt_64], rax
+
+    xor rcx, rcx
+.fill_pd_64:
+    mov rax, rcx
+    shl rax, 21
+    or  rax, 0x87
+    mov [pd_64 + rcx * 8], rax
+    inc rcx
+    cmp rcx, 512
+    jne .fill_pd_64
+
+    ; --- ОТЛАДКА: 'G' ---
+    mov al, 'G'
+    out 0xE9, al
+
+    mov rax, pml4_64
+    mov cr3, rax
+
+    ; --- ОТЛАДКА: 'H' ---
+    mov al, 'H'
+    out 0xE9, al
+
+    ret
+
 section .rodata
 align 8
 gdt64:
@@ -101,7 +208,17 @@ stack_bottom:
     resb 32768
 stack_top:
 
+align 16
+stack_bottom_64:
+    resb 16384
+stack_top_64:
+
 align 4096
 pml4: resb 4096
 pdpt: resb 4096
 pd:   resb 4096
+
+align 4096
+pml4_64: resb 4096
+pdpt_64: resb 4096
+pd_64:   resb 4096
