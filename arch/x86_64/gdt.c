@@ -24,6 +24,9 @@ static struct gdt_ptr gp;
 static struct tss64    tss;
 
 static uint8_t kstack[65536] __attribute__((aligned(16)));
+static uint8_t ist1_stack[4096] __attribute__((aligned(16)));
+static uint8_t ist2_stack[4096] __attribute__((aligned(16)));
+
 
 void tss_set_rsp0(uint64_t rsp0) {
     tss.rsp0 = rsp0;
@@ -46,6 +49,9 @@ void gdt_init(void) {
     for (unsigned i = 0; i < sizeof(tss); i++) ((uint8_t *)&tss)[i] = 0;
     tss.iomap_base = sizeof(tss);
     tss.rsp0 = (uint64_t)&kstack[sizeof(kstack)];
+
+    tss.ist[0] = (uint64_t)&ist1_stack[sizeof(ist1_stack)]; // IST1 для #DF
+    tss.ist[1] = (uint64_t)&ist2_stack[sizeof(ist2_stack)]; // IST2 для NMI
 
     uint64_t base  = (uint64_t)&tss;
     uint32_t limit = sizeof(tss) - 1;

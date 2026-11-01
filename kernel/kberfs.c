@@ -449,3 +449,60 @@ static int file_read_bytes(struct berfs_mount *m, const struct berfs_inode *in,
                                                                                                                                   (void)m;
                                                                                                                                   return 0;
                                                                                                                               }
+
+                                                                                                                              void berfs_truncate(struct berfs_mount *m, struct berfs_inode *in) {
+                                                                                                                                  // 1. Освобождаем прямые блоки
+                                                                                                                                  for (int i = 0; i < BERFS_DIRECT_BLOCKS; i++) {
+                                                                                                                                      if (in->i_block[i] != 0) {
+                                                                                                                                          berfs_free_block(m, in->i_block[i]);
+                                                                                                                                          in->i_block[i] = 0;
+                                                                                                                                      }
+                                                                                                                                  }
+
+                                                                                                                                  uint32_t ptrs_per_block = BLOCK_SIZE / sizeof(uint32_t);
+                                                                                                                                  uint8_t *buf = kmalloc(BLOCK_SIZE);
+                                                                                                                                  if (!buf) return;
+
+                                                                                                                                  // 2. Освобождаем одинарный indirect
+                                                                                                                                  if (in->i_indirect != 0) {
+                                                                                                                                      bdev_read(in->i_indirect, buf);
+                                                                                                                                      uint32_t *ptrs = (uint32_t *)buf;
+                                                                                                                                      for (uint32_t i = 0; i < ptrs_per_block; i++) {
+                                                                                                                                          if (ptrs[i] != 0) berfs_free_block(m, ptrs[i]);
+                                                                                                                                      }
+                                                                                                                                      berfs_free_block(m, in->i_indirect);
+                                                                                                                                      in->i_indirect = 0;
+                                                                                                                                  }
+
+                                                                                                                                  // 3. Двойной indirect
+                                                                                                                                  if (in->i_double_indirect != 0) {
+                                                                                                                                      bdev_read(in->i_double_indirect, buf);
+                                                                                                                                      uint32_t *ptrs1 = (uint32_t *)buf;
+                                                                                                                                      for (uint32_t i = 0; i < ptrs_per_block; i++) {
+                                                                                                                                          if (ptrs1[i] != 0) {
+                                                                                                                                              uint8_t *buf2 = kmalloc(BLOCK_SIZE);
+                                                                                                                                              if (buf2) {
+                                                                                                                                                  bdev_read(ptrs1[i], buf2);
+                                                                                                                                                  uint32_t *ptrs2 = (uint32_t *)buf2;
+                                                                                                                                                  for (uint32_t j = 0; j < ptrs_per_block; j++) {
+                                                                                                                                                      if (ptrs2[j] != 0) berfs_free_block(m, ptrs2[j]);
+                                                                                                                                                  }
+                                                                                                                                                  kfree(buf2);
+                                                                                                                                              }
+                                                                                                                                              berfs_free_block(m, ptrs1[i]);
+                                                                                                                                          }
+                                                                                                                                      }
+                                                                                                                                      berfs_free_block(m, in->i_double_indirect);
+                                                                                                                                      in->i_double_indirect = 0;
+                                                                                                                                  }
+
+                                                                                                                                  // 4. Тройной indirect (пока просто освобождаем, если есть)
+                                                                                                                                  if (in->i_triple_indirect != 0) {
+                                                                                                                                      berfs_free_block(m, in->i_triple_indirect);
+                                                                                                                                      in->i_triple_indirect = 0;
+                                                                                                                                  }
+
+                                                                                                                                  kfree(buf);
+                                                                                                                                  in->i_size = 0;
+                                                                                                                                  in->i_blocks = 0;
+                                                                                                                              }

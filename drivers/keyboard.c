@@ -1,5 +1,6 @@
 #include "keyboard.h"
 #include "io.h"
+#include "sched.h"
 
 #define KB_DATA   0x60
 #define KB_STATUS 0x64
@@ -51,10 +52,10 @@ void kb_handler(void) {
 
     /* Определяем, нужен ли верхний регистр */
     int use_upper = 0;
-    if (sc >= 0x10 && sc <= 0x32) { // Буквы (q, w, e, r...)
-        use_upper = shift_down ^ caps_lock; // Если включен Shift или Caps -> большие
+    if (sc >= 0x10 && sc <= 0x32) {
+        use_upper = shift_down ^ caps_lock;
     } else {
-        use_upper = shift_down; // Для цифр и символов только Shift
+        use_upper = shift_down;
     }
 
     char c = use_upper ? map_upper[sc] : map_lower[sc];
@@ -62,6 +63,13 @@ void kb_handler(void) {
 
     int next = (head + 1) % BUF_SIZE;
     if (next != tail) { buf[head] = c; head = next; }
+
+    // ВОТ СЮДА ВСТАВЬ ЭТОТ БЛОК (внутрь функции, перед закрывающей скобкой):
+    extern struct task *kb_waiting_task;
+    if (kb_waiting_task) {
+        kb_waiting_task->state = TASK_READY;
+        kb_waiting_task = 0;
+    }
 }
 
 int  kb_ready(void) { return head != tail; }

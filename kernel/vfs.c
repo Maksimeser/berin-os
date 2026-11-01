@@ -268,12 +268,10 @@ int vfs_mount_add(const char *path, uint32_t root_ino,
 
                                       struct berfs_inode in;
                                       if (berfs_read_inode(bm, ino, &in) == 0) {
-                                          for (int i = 0; i < BERFS_DIRECT_BLOCKS; i++) {
-                                              if (in.i_block[i] != 0) {
-                                                  berfs_free_block(bm, in.i_block[i]);
-                                                  in.i_block[i] = 0;
-                                              }
-                                          }
+
+                                          extern void berfs_truncate(struct berfs_mount *m, struct berfs_inode *in);
+                                          berfs_truncate(bm, &in);
+                                          berfs_write_inode(bm, ino, &in); //
                                       }
                                       berfs_free_inode(bm, ino);
                                       return 0;

@@ -56,8 +56,8 @@ void _start(void) {
     char pass[32];
 
     while (1) {
-        // Подсказка снизу
-        write(1, "\033[90m(login: admin, pass: admin | type 'reboot' or 'shutdown' to power off)\033[0m\n", 82);
+        // Подсказка снизу (обновил текст)
+        write(1, "\033[90m(login: root/root or user/user | type 'reboot' or 'shutdown' to power off)\033[0m\n", 86);
 
         write(1, "berin login: ", 13);
 
@@ -68,12 +68,12 @@ void _start(void) {
         // Спец-команды
         if (str_eq(user, "reboot")) {
             write(1, "[ INFO ] rebooting...\n", 23);
-            _syscall6(60, 100, 0, 0, 0, 0); // _exit(100) -> reboot
+            _syscall6(210, 0, 0, 0, 0, 0); // <--- ИЗМЕНЕНО на SYS_REBOOT
             for(;;) __asm__ __volatile__("hlt");
         }
         if (str_eq(user, "shutdown") || str_eq(user, "poweroff") || str_eq(user, "halt")) {
             write(1, "[ INFO ] shutting down...\n", 27);
-            _syscall6(60, 101, 0, 0, 0, 0); // _exit(101) -> logoff
+            _syscall6(211, 0, 0, 0, 0, 0); // <--- ИЗМЕНЕНО на SYS_SHUTDOWN
             for(;;) __asm__ __volatile__("hlt");
         }
 
@@ -81,10 +81,20 @@ void _start(void) {
         for (int i = 0; i < 32; i++) pass[i] = 0;
         read_password(pass, sizeof(pass));
 
-        if (str_eq(user, "admin") && str_eq(pass, "admin")) {
-            write(1, "\n\033[92m[ OK ] Welcome to Berin OS, admin!\033[0m\n", 44);
-            _syscall6(SYS_SPAWN, (long)"/bin/berbash.elf", 0, 0, 0, 0);
-        } else {
+        // ВОТ ЗДЕСЬ ТВОЙ НОВЫЙ БЛОК ПРОВЕРКИ:
+        if (str_eq(user, "root") && str_eq(pass, "root")) {
+            write(1, "\n\033[92m[ OK ] Welcome, root!\033[0m\n", 38);
+            // Передаем uid 0 в spawn
+            long pid = _syscall6(SYS_SPAWN, (long)"/bin/berbash.elf", 0, 0, 0, 0);
+            if (pid > 0) { int st; _syscall6(61, pid, (long)&st, 0, 0, 0); }
+        }
+        else if (str_eq(user, "user") && str_eq(pass, "user")) {
+            write(1, "\n\033[92m[ OK ] Welcome, user!\033[0m\n", 38);
+            // Передаем uid 1000 в spawn
+            long pid = _syscall6(SYS_SPAWN, (long)"/bin/berbash.elf", 1000, 0, 0, 0);
+            if (pid > 0) { int st; _syscall6(61, pid, (long)&st, 0, 0, 0); }
+        }
+        else {
             write(1, "\n\033[91mLogin incorrect\033[0m\n\n", 27);
         }
     }

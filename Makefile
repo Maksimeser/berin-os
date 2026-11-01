@@ -42,15 +42,8 @@ $(BUILD)/%.o: %.asm
 	$(AS) $(ASFLAGS) $< -o $@
 
 run: $(KERNEL)
-	qemu-system-x86_64 -kernel $(KERNEL) -m 128M -serial stdio \
-	    -drive file=disk.img,format=raw,if=ide,cache=writethrough \
-	    -drive file=fat.img,format=raw,if=ide,index=1 \
-	    -no-reboot
-
-debug: $(KERNEL)
-	qemu-system-x86_64 -kernel $(KERNEL) -m 128M -serial stdio \
-	    -drive file=disk.img,format=raw,if=ide,cache=writethrough \
-	    -no-reboot -d int -D qemu.log
+	cp $(KERNEL) turload/build/esp/berin.bin
+	$(MAKE) -C turload run
 
 clean:
 	rm -rf $(BUILD) $(KERNEL) tools/bformat tools/bfsck tools/bls tools/bput tools/brm

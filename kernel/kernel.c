@@ -1,6 +1,4 @@
-/* Berin - kernel x86_64
- * VGA + serial + ANSI + IDT + PIC + PIT + PS/2 keyboard + kerbash + panic
- */
+// Berin - kernel x86_64
 #include "heap.h"
 #include "pmm.h"
 #include "blockdev.h"
@@ -19,6 +17,11 @@
 #include "keyboard.h"
 #include <stdint.h>
 #include <stddef.h>
+
+#include "boot_info.h"
+#include "fonts/cp866_8x16.h"
+static uint8_t term_fg = 7;
+static uint8_t term_bg = 0;
 
 /* ============================================================
  *  Port I/O
@@ -41,31 +44,127 @@ static inline void outw(uint16_t port, uint16_t val) {
 #define COM1 0x3F8
 
 static void serial_init(void) {
-    // Закомментировали всё, чтобы проверить, не она ли вешает систему
-    /*
-     *   outb(COM1 + 1, 0x00);
-     *   outb(COM1 + 3, 0x80);
-     *   outb(COM1 + 0, 0x01);
-     *   outb(COM1 + 1, 0x00);
-     *   outb(COM1 + 3, 0x03);
-     *   outb(COM1 + 2, 0xC7);
-     *   outb(COM1 + 4, 0x0B);
-     */
+    outb(COM1 + 1, 0x00);
+    outb(COM1 + 3, 0x80);
+    outb(COM1 + 0, 0x01);
+    outb(COM1 + 1, 0x00);
+    outb(COM1 + 3, 0x03);
+    outb(COM1 + 2, 0xC7);
+    outb(COM1 + 4, 0x0B);
 }
 static int  serial_tx_empty(void) { return inb(COM1 + 5) & 0x20; }
-static int  serial_rx_ready(void) { return inb(COM1 + 5) & 0x01; }
+int  serial_rx_ready(void) { return inb(COM1 + 5) & 0x01; }
 
-static void serial_write_char(char c) {
+void serial_write_char(char c) {      // <--- ЭТО ДОЛЖНО БЫТЬ
     while (!serial_tx_empty()) ;
     outb(COM1, (uint8_t)c);
 }
-static char serial_read_char(void) {
+static char serial_read_char(void) {         // <--- И ЭТО
     while (!serial_rx_ready()) ;
     return (char)inb(COM1);
 }
 
 /* ============================================================
- *  VGA text mode 80x25
+ *  Framebuffer (GOP)
+ * ============================================================ */
+static struct boot_info *g_binfo = 0;
+static volatile uint32_t *g_fb = 0;
+static uint32_t fb_col = 0;
+static uint32_t fb_row = 0;
+
+#define FB_BLACK   0x00000000
+#define FB_LGREEN  0x0000FF00
+
+static uint32_t vga_to_rgb(uint8_t color) {
+    switch(color & 0x0F) {
+        case 0: return 0x000000; case 1: return 0x0000AA;
+        case 2: return 0x00AA00; case 3: return 0x00AAAA;
+        case 4: return 0xAA0000; case 5: return 0xAA00AA;
+        case 6: return 0xAA5500; case 7: return 0xAAAAAA;
+        case 8: return 0x555555; case 9: return 0x5555FF;
+        case 10: return 0x55FF55; case 11: return 0x55FFFF;
+        case 12: return 0xFF5555; case 13: return 0xFF55FF;
+        case 14: return 0xFFFF55; case 15: return 0xFFFFFF;
+        default: return 0xFFFFFF;
+    }
+}
+
+static void fb_putpixel(uint32_t x, uint32_t y, uint32_t color) {
+    if (!g_fb || x >= g_binfo->fb_width || y >= g_binfo->fb_height) return;
+    g_fb[(y * (g_binfo->fb_pitch / 4)) + x] = color;
+}
+
+static void fb_clear(uint32_t color) {
+    if (!g_fb) return;
+    for (uint32_t y = 0; y < g_binfo->fb_height; y++) {
+        for (uint32_t x = 0; x < g_binfo->fb_width; x++) {
+            g_fb[(y * (g_binfo->fb_pitch / 4)) + x] = color;
+        }
+    }
+    fb_col = 0; fb_row = 0;
+}
+
+static void fb_scroll(void) {
+    if (!g_fb) return;
+
+    uint32_t line_height = 16;
+    uint32_t pitch = g_binfo->fb_pitch / 4;
+    uint32_t total_pixels = g_binfo->fb_height * pitch;
+    uint32_t shift_pixels = line_height * pitch;
+
+    for (uint32_t i = 0; i < total_pixels - shift_pixels; i++) {
+        g_fb[i] = g_fb[i + shift_pixels];
+    }
+
+    for (uint32_t i = total_pixels - shift_pixels; i < total_pixels; i++) {
+        g_fb[i] = FB_BLACK;
+    }
+
+    if (fb_row > 0) fb_row--;
+}
+
+static void fb_putchar(char c) {
+    if (!g_fb) return;
+
+    if (c == '\n') {
+        fb_col = 0;
+        fb_row++;
+    } else if (c == '\b') {
+        if (fb_col > 0) fb_col--;
+    } else if (c == '\r') {
+        fb_col = 0;
+    } else {
+        const uint8_t *glyph = cp866_8x16[(uint8_t)c];
+        uint32_t fg = vga_to_rgb(term_fg);
+        uint32_t bg = vga_to_rgb(term_bg);
+
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 8; x++) {
+                if (glyph[y] & (0x80 >> x)) {
+                    fb_putpixel(fb_col * 8 + x, fb_row * 16 + y, fg);
+                } else {
+                    fb_putpixel(fb_col * 8 + x, fb_row * 16 + y, bg);
+                }
+            }
+        }
+        fb_col++;
+    }
+
+    if (fb_col >= g_binfo->fb_width / 8) {
+        fb_col = 0;
+        fb_row++;
+    }
+
+    if (fb_row >= g_binfo->fb_height / 16) {
+        fb_scroll();
+    }
+
+    if (c == '\n') serial_write_char('\r');
+    serial_write_char(c);
+}
+
+/* ============================================================
+ *  VGA Text Mode
  * ============================================================ */
 #define VGA_WIDTH  80
 #define VGA_HEIGHT 25
@@ -78,8 +177,6 @@ static char serial_read_char(void) {
 
 static size_t  term_row;
 static size_t  term_col;
-static uint8_t term_fg = C_GRAY;
-static uint8_t term_bg = C_BLACK;
 static uint8_t term_color = 0x07;
 
 static inline uint16_t vga_entry(unsigned char c, uint8_t color) {
@@ -93,11 +190,18 @@ void term_set_bg(uint8_t bg) { term_bg = bg & 0x0F; term_update_color(); }
 void term_reset_color(void)  { term_fg = C_GRAY; term_bg = C_BLACK; term_update_color(); }
 
 void term_clear(void) {
+    // Очистка VGA
     for (size_t y = 0; y < VGA_HEIGHT; y++)
         for (size_t x = 0; x < VGA_WIDTH; x++)
             VGA_MEMORY[y * VGA_WIDTH + x] = vga_entry(' ', term_color);
     term_row = 0;
-    term_col = 0; {
+    term_col = 0;
+
+    // Очистка Framebuffer, если он есть
+    if (g_fb) {
+        fb_clear(FB_BLACK);
+        __asm__ __volatile__("wbinvd");
+    } else {
         outb(0x3D4, 0x0F);
         outb(0x3D5, 0x00);
         outb(0x3D4, 0x0E);
@@ -175,7 +279,12 @@ void term_putchar(char c) {
         return;
     }
     if (c == '\033') { ansi_state = 1; return; }
-    term_emit(c);
+
+    if (g_fb) {
+        fb_putchar(c);
+    } else {
+        term_emit(c);
+    }
 }
 
 void term_write(const char *s) {
@@ -313,7 +422,7 @@ static int builtin_clear(int argc, char **argv) {
 
 static int builtin_about(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("Berin OS v0.0.3 (x86_64)\n");
+    term_write("Berin v0.0.3 (x86_64)\n");
     term_write("Berin. Your own system.\n");
     term_write("vendor: Turker Games\n");
     term_write("mascot: Sorsha, green fox\n");
@@ -322,7 +431,7 @@ static int builtin_about(int argc, char **argv) {
 
 static int builtin_versi(int argc, char **argv) {
     (void)argc; (void)argv;
-    term_write("Berin OS 0.0.3 \"Sorsha\"\n");
+    term_write("Berin kernel 0.0.3 \"Sorsha\"\n");
     term_write("  kernel   0.0.3   x86_64, long mode\n");
     term_write("  kerbash  0.3     kernel shell\n");
     term_write("  serial   0.1     COM1 115200 8N1\n");
@@ -628,7 +737,6 @@ static int builtin_fat(int argc, char **argv) {
     return 0;
 }
 
-
 static int builtin_fatls(int argc, char **argv) {
     (void)argc; (void)argv;
     if (fat32_init() != 0) {
@@ -815,13 +923,16 @@ static void kerbash_run(void) {
 /* ============================================================
  *  Entry
  * ============================================================ */
-void kernel_main(void) {
-    #define DBG(c) __asm__ __volatile__("outb %%al, %%dx" :: "a"(c), "d"(0xE9))
-
-    DBG('I');           // Вход в kernel_main
+void kernel_main(struct boot_info *binfo) {
+    // Инициализация фреймбуфера (GOP)
+    if (binfo && binfo->fb_base) {
+        g_binfo = binfo;
+        g_fb = (volatile uint32_t *)(uintptr_t)binfo->fb_base;
+    } else {
+        g_fb = 0;
+    }
 
     serial_init();
-    DBG('J');           // Serial OK
 
     {
         uint64_t cr0, cr4;
@@ -835,17 +946,15 @@ void kernel_main(void) {
     }
 
     gdt_init();
-    DBG('K');           // GDT OK
 
     term_set_fg(C_LGREEN);
     term_set_bg(C_BLACK);
     term_clear();
-    DBG('L');           // VGA OK
+    term_write("\n");
 
     heap_init();
     vfs_init();
     bdev_init();
-    DBG('M');           // Heap/VFS/Bdev OK
 
     int mrc = berfs_mount_fs(&g_root);
     if (mrc != 0) {
@@ -854,18 +963,16 @@ void kernel_main(void) {
     if (mrc == 0) {
         vfs_mount_berfs(&g_root);
     }
-    DBG('N');           // BerFS mount OK
 
-    if (fat32_init() == 0) {
-        vfs_mount_add("/mnt", fat32_get_root_cluster(), fat32_get_vfs_ops(), 0);
-        term_write("[ OK ] FAT32 mounted at /mnt\n");
-    } else {
-        term_write("[ FAIL ] FAT32 mount failed\n");
-    }
-    DBG('O');           // FAT32 mount OK
+    // Временно отключаем FAT32, чтобы не зависало на UEFI
+    // if (fat32_init() == 0) {
+    //     vfs_mount_add("/mnt", fat32_get_root_cluster(), fat32_get_vfs_ops(), 0);
+    //     term_write("[ OK ] FAT32 mounted at /mnt\n");
+    // } else {
+    //     term_write("[ FAIL ] FAT32 mount failed\n");
+    // }
 
     pmm_init();
-    DBG('P');           // PMM OK
 
     idt_init();
     pic_remap();
@@ -874,10 +981,8 @@ void kernel_main(void) {
     pic_unmask(0);
     pic_unmask(1);
     __asm__ __volatile__("sti");
-    DBG('Q');           // IDT/PIC/PIT/KB OK, Interrupts ON
 
     term_write("Berin loaded!\n");
-    term_write("Long mode: OK\n");
     term_write("\n");
     term_write(" /\\     /\\\n");
     term_write("/  \\___/  \\\n");
@@ -885,24 +990,15 @@ void kernel_main(void) {
     term_write(" \\   \x1F   /\n");
     term_write("  \\_____/\n");
     term_write("\n");
-    term_write("Berin OS v0.0.3\n");
-    term_write("vendor: Turker Games\n");
-    term_write("\n");
-    term_write("\033[91m [ BERIN KERNEL ]\n");
-    term_write(" 64-bit\n");
-    term_write(" _  _  _  _  _\n");
-    term_write("| || || || || |\n");
-    term_write("|_||_||_||_||_|\033[0m\n\n");
 
+    __asm__ __volatile__("wbinvd");
     sched_init();
-    DBG('R');           // Планировщик OK
 
     const char *init_paths[] = {
         "/sbin/init",
         "/bin/init",
         "/bin/login.elf",
         "/bin/berbash.elf",
-        "/berbash.elf",
         0
     };
 
@@ -917,11 +1013,9 @@ void kernel_main(void) {
             break;
         }
     }
-    DBG('S');           // Поиск init завершен
 
     if (!init_to_run) {
         term_write("[ FAIL ] No init found. Dropping to kerbash.\n");
-        DBG('T');       // Идем в kerbash
         kerbash_run();
     } else {
         term_write("[ init ] found: ");
@@ -933,7 +1027,6 @@ void kernel_main(void) {
         if (fd >= 0 && code) {
             vfs_read(fd, code, init_size);
             vfs_close(fd);
-            DBG('U');   // Файл init прочитан в память
 
             uint64_t *new_pml4 = vmm_create_pml4();
             uint64_t entry = 0;
@@ -948,8 +1041,8 @@ void kernel_main(void) {
                 struct task *t = task_create(entry, new_pml4, user_rsp);
                 if (t) {
                     term_write("[ init ] started as PID 1\n");
-                    DBG('V');   // Переключаемся на задачу
-                    schedule(); // Прыгаем в Ring 3
+                    extern void idle_loop(void);
+                    idle_loop();
                 } else {
                     term_write("[ FAIL ] task_create failed\n");
                 }

@@ -27,4 +27,6 @@ int berfs_free_inode(struct berfs_mount *m, uint32_t ino);
 int berfs_dir_remove(struct berfs_mount *m, struct berfs_inode *dir_inode,
                      uint32_t dir_ino, const char *name);
 
+void berfs_truncate(struct berfs_mount *m, struct berfs_inode *in);
+
 #endif

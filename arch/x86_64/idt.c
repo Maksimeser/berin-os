@@ -3,6 +3,7 @@
 #include "idt.h"
 #include "pic.h"
 #include "syscall.h"
+#include "sched.h"
 
 extern void berin_panic(uint16_t code, const char *name, struct regs *r);
 extern void timer_tick(void);
@@ -28,12 +29,12 @@ static struct idt_ptr   idtp;
 
 extern uint64_t isr_stub_table[256];
 
-static void idt_set(int n, uint64_t base, uint16_t sel, uint8_t flags) {
+static void idt_set(int n, uint64_t base, uint16_t sel, uint8_t flags, uint8_t ist) {
     idt[n].offset_low  = (uint16_t)(base & 0xFFFF);
     idt[n].offset_mid  = (uint16_t)((base >> 16) & 0xFFFF);
     idt[n].offset_high = (uint32_t)((base >> 32) & 0xFFFFFFFF);
     idt[n].selector    = sel;
-    idt[n].ist         = 0;
+    idt[n].ist         = ist;
     idt[n].flags       = flags;
     idt[n].reserved    = 0;
 }
@@ -74,9 +75,13 @@ void isr_handler(struct regs *r) {
 
     if (r->int_no >= 32 && r->int_no < 48) {
         uint8_t irq = (uint8_t)(r->int_no - 32);
+
         if (irq == 0) timer_tick();
         if (irq == 1) kb_handler();
         pic_eoi(irq);
+        if (irq == 0 && (r->cs & 3) == 3) {
+            schedule();
+        }
         return;
     }
 
@@ -92,7 +97,12 @@ void idt_init(void) {
 
     for (int i = 0; i < 256; i++) {
         uint8_t flags = (i == 0x80) ? 0xEE : 0x8E;
-        idt_set(i, isr_stub_table[i], 0x08, flags);
+
+        uint8_t ist = 0;
+        if (i == 8)  ist = 1;
+        if (i == 2)  ist = 2;
+
+        idt_set(i, isr_stub_table[i], 0x08, flags, ist);
     }
 
     __asm__ __volatile__("lidt %0" : : "m"(idtp));

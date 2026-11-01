@@ -1,5 +1,4 @@
 ; Berin - x86_64 boot
-
 section .note.Xen progbits alloc noexec nowrite align=4
     align 4
     dd 4
@@ -79,7 +78,7 @@ long_mode_entry:
 
     mov rsp, stack_top
     xor rbp, rbp
-
+    xor rdi, rdi
     call kernel_main
 
 .hang:
@@ -95,15 +94,9 @@ _start_efi:
     cli
     mov rsp, stack_top_64
 
-    ; --- ОТЛАДКА: 'A' ---
-    mov al, 'A'
-    out 0xE9, al
+    push rdi
 
     lgdt [gdt64_ptr]
-
-    ; --- ОТЛАДКА: 'B' ---
-    mov al, 'B'
-    out 0xE9, al
 
     push 0x08
     lea rax, [rel .reload_cs]
@@ -118,16 +111,9 @@ _start_efi:
     mov gs, ax
     mov ss, ax
 
-    ; --- ОТЛАДКА: 'C' ---
-    mov al, 'C'
-    out 0xE9, al
-
     call setup_paging_64
 
-    ; --- ОТЛАДКА: 'D' ---
-    mov al, 'D'
-    out 0xE9, al
-
+    pop rdi
     call kernel_main
 
 .hang_efi:
@@ -136,10 +122,6 @@ _start_efi:
     jmp .hang_efi
 
 setup_paging_64:
-    ; --- ОТЛАДКА: 'E' ---
-    mov al, 'E'
-    out 0xE9, al
-
     mov rdi, pml4_64
     mov rcx, 512
     xor rax, rax
@@ -151,43 +133,37 @@ setup_paging_64:
     rep stosq
 
     mov rdi, pd_64
-    mov rcx, 512
+    mov rcx, 2048
     xor rax, rax
     rep stosq
-
-    ; --- ОТЛАДКА: 'F' ---
-    mov al, 'F'
-    out 0xE9, al
 
     mov rax, pdpt_64
     or  rax, 0x07
     mov [pml4_64], rax
 
-    mov rax, pd_64
-    or  rax, 0x07
-    mov [pdpt_64], rax
-
     xor rcx, rcx
-.fill_pd_64:
-    mov rax, rcx
-    shl rax, 21
-    or  rax, 0x87
-    mov [pd_64 + rcx * 8], rax
+.fill_pdpt_64:
+    mov rax, pd_64
+    mov rdx, rcx
+    shl rdx, 12
+    add rax, rdx
+    or  rax, 0x07
+    mov [pdpt_64 + rcx * 8], rax
     inc rcx
-    cmp rcx, 512
-    jne .fill_pd_64
+    cmp rcx, 4
+    jne .fill_pdpt_64
 
-    ; --- ОТЛАДКА: 'G' ---
-    mov al, 'G'
-    out 0xE9, al
+    mov rdi, pd_64
+    mov rax, 0x97
+    mov rcx, 2048
+.fill_pd_64:
+    mov [rdi], rax
+    add rax, 0x200000
+    add rdi, 8
+    loop .fill_pd_64
 
     mov rax, pml4_64
     mov cr3, rax
-
-    ; --- ОТЛАДКА: 'H' ---
-    mov al, 'H'
-    out 0xE9, al
-
     ret
 
 section .rodata
@@ -221,4 +197,4 @@ pd:   resb 4096
 align 4096
 pml4_64: resb 4096
 pdpt_64: resb 4096
-pd_64:   resb 4096
+pd_64:   resb 16384

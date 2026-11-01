@@ -14,10 +14,8 @@ switch_to:
     push r15
 
     ; Сохраняем текущий RSP в prev->kernel_rsp (смещение 16)
-    mov [rdi + 16], rsp
-
-    ; Загружаем RSP из next->kernel_rsp
-    mov rsp, [rsi + 16]
+    mov [rdi + 24], rsp
+    mov rsp, [rsi + 24]
 
     ; Восстанавливаем регистры нового процесса
     pop r15

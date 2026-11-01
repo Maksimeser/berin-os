@@ -340,6 +340,19 @@ static int builtin_echo(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_su(int argc, char **argv) {
+    (void)argc; (void)argv;
+    #ifdef __BERIN__
+    long r = _syscall6(103, 0, 0, 0, 0, 0);
+    if (r == 0) {
+        out_str("[ OK ] Now you are root!\n", 25);
+    } else {
+        out_str("[ FAIL ] Access denied\n", 23);
+    }
+    #endif
+    return 0;
+}
+
 static int builtin_help(int argc, char **argv) {
     (void)argc; (void)argv;
     out_str("berbash 0.1.2 - builtins:\n", bb_strlen("berbash 0.1.2 - builtins:\n"));
@@ -355,8 +368,21 @@ static int builtin_exit(int argc, char **argv) {
 
 static int builtin_whoami(int argc, char **argv) {
     (void)argc; (void)argv;
+
+    #ifdef __BERIN__
+    long uid = _syscall6(102, 0, 0, 0, 0, 0);
+    const char *u = (uid == 0) ? "root" : "user";
+    int i = 0; while (u[i]) { username[i] = u[i]; i++; } username[i] = 0;
+
+    const char *h = "/"; i = 0; while (h[i]) { home[i] = h[i]; i++; } home[i] = 0;
+    i = 0; while (h[i]) { cwd[i] = h[i]; i++; } cwd[i] = 0;
+    const char *hn = "berin"; i = 0; while (hn[i]) { hostname[i] = hn[i]; i++; } hostname[i] = 0;
+    const char *p = "\\e[90m[\\e[93m\\u\\e[90m@\\e[92m\\h\\e[90m \\e[94m\\w\\e[90m]\\e[97m\\$\\e[0m ";
+    i = 0; while (p[i]) { ps1[i] = p[i]; i++; } ps1[i] = 0;
+    #else
     out_str(username, bb_strlen(username));
     out_str("\n", 1);
+    #endif
     return 0;
 }
 
@@ -590,8 +616,20 @@ struct builtin {
     int (*fn)(int argc, char **argv);
 };
 
-static int builtin_reboot(int argc, char **argv) { (void)argc; (void)argv; return 100; }
-static int builtin_logoff(int argc, char **argv) { (void)argc; (void)argv; return 101; }
+static int builtin_reboot(int argc, char **argv) {
+    (void)argc; (void)argv;
+    #ifdef __BERIN__
+    _syscall6(210, 0, 0, 0, 0, 0);
+    #endif
+    return 0;
+}
+static int builtin_logoff(int argc, char **argv) {
+    (void)argc; (void)argv;
+    #ifdef __BERIN__
+    _syscall6(211, 0, 0, 0, 0, 0);
+    #endif
+    return 0;
+}
 
 static int builtin_run(int argc, char **argv) {
     if (argc < 2) { out_str("usage: run <path>\n", 18); return 0; }
@@ -624,7 +662,7 @@ static struct builtin builtins[] = {
     { "ls",      builtin_ls      },  { "cat",     builtin_cat     },
     { "cd",      builtin_cd      },  { "pwd",     builtin_pwd     },
     { "rm",      builtin_rm      },  { "touch",   builtin_touch   },
-    {"run",      builtin_run     },
+    {"run",      builtin_run     },  { "su",      builtin_su      },
     { 0, 0 },
 };
 
