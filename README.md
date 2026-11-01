@@ -1,20 +1,55 @@
-# Berin OS
+# Berin OS - Main Makefile
 
-**Berin. Your own system.**
+.PHONY: all kernel tools userland run clean
 
-Hobby OS from scratch. x86_64, long mode, custom kernel, custom filesystem (BerFS), custom shell (kerbash / berbash).
+# Путь к папке с ядром (соседняя директория)
+KERNEL_DIR := ../berin_kernel
 
-> Mascot: green fox.
+all: kernel tools
 
-## Status
+# Сборка ядра и копирование бинарника в Turload
+kernel:
+	$(MAKE) -C $(KERNEL_DIR)
+	cp $(KERNEL_DIR)/berin.bin turload/build/esp/berin.bin
 
-Phase 6.3 — VFS + userland shell (in progress).
+# ==========================================
+# Хостовые утилиты для BerFS
+# ==========================================
+TOOL_COMMON := tools/berfs_host.c tools/berfs_dir.c tools/berfs_alloc.c
+TOOLS       := bformat bfsck bls bput brm
 
-Working: boot (PVH + long mode), GDT+TSS, IDT (256 vectors), PIC, PIT (100 Hz), PS/2 keyboard, serial COM1, PMM (bitmap, 4K pages), paging (2 MB huge pages), kmalloc/kfree, ring 3 + int 0x80 syscalls, ELF64 loader, ATA PIO, BerFS v1, VFS, kerbash, berbash (WIP), libb (WIP).
+tools: $(addprefix tools/, $(TOOLS))
 
-## Build
+tools/bformat: tools/bformat.c $(TOOL_COMMON)
+	gcc -O2 -o $@ $< $(TOOL_COMMON)
 
-Requirements: `nasm`, `gcc`, `make`, `qemu-system-x86_64`.
+tools/bfsck: tools/bfsck.c $(TOOL_COMMON)
+	gcc -O2 -o $@ $< $(TOOL_COMMON)
 
-```bash
-make clean && make -k -j$(nproc) && make run
+tools/bls: tools/bls.c $(TOOL_COMMON)
+	gcc -O2 -o $@ $< $(TOOL_COMMON)
+
+tools/bput: tools/bput.c $(TOOL_COMMON)
+	gcc -O2 -o $@ $< $(TOOL_COMMON)
+
+tools/brm: tools/brm.c $(TOOL_COMMON)
+	gcc -O2 -o $@ $< $(TOOL_COMMON)
+
+# ==========================================
+# Сборка юзерленда
+# ==========================================
+userland:
+	$(MAKE) -C userland/sh clean
+	$(MAKE) -C userland/sh
+
+# ==========================================
+# Запуск в QEMU
+# ==========================================
+run: kernel
+	$(MAKE) -C turload run
+
+# Очистка всего
+clean:
+	$(MAKE) -C $(KERNEL_DIR) clean
+	rm -f tools/bformat tools/bfsck tools/bls tools/bput tools/brm
+	$(MAKE) -C userland/sh clean || true

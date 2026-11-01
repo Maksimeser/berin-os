@@ -106,12 +106,29 @@ static unsigned parse_flags(const char *tok, const char *valid) {
 
 static void init_env(void) {
     #ifdef __BERIN__
-    const char *u = "!admin"; int i = 0; while (u[i]) { username[i] = u[i]; i++; } username[i] = 0;
+    long uid = _syscall6(102, 0, 0, 0, 0, 0);
+    int i = 0;
+
+    if (uid == 0) {
+        const char *u = "root";
+        while (u[i]) { username[i] = u[i]; i++; } username[i] = 0;
+        const char *p = "\\e[90m[\\e[93m\\u\\e[90m@\\e[92m\\h\\e[90m \\e[94m\\w\\e[90m]\\e[97m#\\e[0m ";
+        i = 0; while (p[i]) { ps1[i] = p[i]; i++; } ps1[i] = 0;
+    } else if (uid == 1000) {
+        const char *u = ">user";
+        while (u[i]) { username[i] = u[i]; i++; } username[i] = 0;
+        const char *p = "\\e[90m[\\e[93m\\u\\e[90m@\\e[92m\\h\\e[90m \\e[94m\\w\\e[90m]\\e[97m$\\e[0m ";
+        i = 0; while (p[i]) { ps1[i] = p[i]; i++; } ps1[i] = 0;
+    } else {
+        const char *u = "!admin";
+        while (u[i]) { username[i] = u[i]; i++; } username[i] = 0;
+        const char *p = "\\e[90m[\\e[93m\\u\\e[90m@\\e[92m\\h\\e[90m \\e[94m\\w\\e[90m]\\e[97m$\\e[0m ";
+        i = 0; while (p[i]) { ps1[i] = p[i]; i++; } ps1[i] = 0;
+    }
+
     const char *h = "/"; i = 0; while (h[i]) { home[i] = h[i]; i++; } home[i] = 0;
     i = 0; while (h[i]) { cwd[i] = h[i]; i++; } cwd[i] = 0;
     const char *hn = "berin"; i = 0; while (hn[i]) { hostname[i] = hn[i]; i++; } hostname[i] = 0;
-    const char *p = "\\e[90m[\\e[93m\\u\\e[90m@\\e[92m\\h\\e[90m \\e[94m\\w\\e[90m]\\e[97m\\$\\e[0m ";
-    i = 0; while (p[i]) { ps1[i] = p[i]; i++; } ps1[i] = 0;
     #else
     struct passwd *pw = getpwuid(getuid());
     if (pw) {
@@ -368,21 +385,8 @@ static int builtin_exit(int argc, char **argv) {
 
 static int builtin_whoami(int argc, char **argv) {
     (void)argc; (void)argv;
-
-    #ifdef __BERIN__
-    long uid = _syscall6(102, 0, 0, 0, 0, 0);
-    const char *u = (uid == 0) ? "root" : "user";
-    int i = 0; while (u[i]) { username[i] = u[i]; i++; } username[i] = 0;
-
-    const char *h = "/"; i = 0; while (h[i]) { home[i] = h[i]; i++; } home[i] = 0;
-    i = 0; while (h[i]) { cwd[i] = h[i]; i++; } cwd[i] = 0;
-    const char *hn = "berin"; i = 0; while (hn[i]) { hostname[i] = hn[i]; i++; } hostname[i] = 0;
-    const char *p = "\\e[90m[\\e[93m\\u\\e[90m@\\e[92m\\h\\e[90m \\e[94m\\w\\e[90m]\\e[97m\\$\\e[0m ";
-    i = 0; while (p[i]) { ps1[i] = p[i]; i++; } ps1[i] = 0;
-    #else
     out_str(username, bb_strlen(username));
     out_str("\n", 1);
-    #endif
     return 0;
 }
 
@@ -637,9 +641,14 @@ static int builtin_run(int argc, char **argv) {
     make_abs(argv[1], abs_path);
 
     #ifdef __BERIN__
-    long r = _syscall6(200, (long)abs_path, 0, 0, 0, 0);
-    if (r < 0) out_str("[ FAIL ] run\n", 14);
-    else out_str("[ OK ] process finished\n", 24);
+    long pid = _syscall6(200, (long)abs_path, 0, 0, 0, 0); // sys_spawn
+    if (pid < 0) {
+        out_str("[ FAIL ] run\n", 14);
+    } else {
+        int status = 0;
+        _syscall6(61, pid, (long)&status, 0, 0, 0);
+        out_str("[ OK ] process finished\n", 24);
+    }
     #else
     pid_t pid = fork();
     if (pid == 0) { execvp(argv[1], &argv[1]); exit(1); }

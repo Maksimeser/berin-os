@@ -1,56 +1,15 @@
-# Berin - Makefile
-CC      := gcc
-AS      := nasm
-LD      := ld
+# Berin OS - Main Makefile (Orchestrator)
 
-CFLAGS  := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
-	   -fno-pic -fno-pie  -mno-red-zone \
-           -mno-mmx -mno-avx -mno-80387 -mgeneral-regs-only \
-           -Wall -Wextra -O2 \
-           -nostdlib -nostartfiles -nodefaultlibs \
-           -Iarch/x86_64 -Idrivers -Ikernel -Imm -Iinclude -Iuserland
-ASFLAGS := -f elf64
-LDFLAGS := -m elf_x86_64 -T linker.ld -nostdlib
+.PHONY: all kernel tools userland run clean
 
-BUILD   := build
-KERNEL  := berin.bin
+KERNEL_DIR := ../berin_kernel
 
-C_SRCS   := kernel/kernel.c kernel/panic.c kernel/elf.c kernel/kstring.c \
-            kernel/blockdev.c kernel/kberfs.c kernel/vfs.c kernel/sched.c kernel/fat32.c \
-            mm/pmm.c mm/paging.c mm/heap.c mm/vmm.c \
-            arch/x86_64/gdt.c arch/x86_64/idt.c arch/x86_64/pic.c arch/x86_64/pit.c arch/x86_64/syscall.c \
-            drivers/keyboard.c drivers/ata.c
-ASM_SRCS := boot/boot.asm arch/x86_64/isr_stubs.asm arch/x86_64/switch.asm
+all: kernel tools
 
-C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
-ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
-OBJS     := $(ASM_OBJS) $(C_OBJS)
-
-.PHONY: all clean run debug tools
-
-all: $(KERNEL)
-
-$(KERNEL): $(OBJS) linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
-
-$(BUILD)/%.o: %.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD)/%.o: %.asm
-	@mkdir -p $(dir $@)
-	$(AS) $(ASFLAGS) $< -o $@
-
-run: $(KERNEL)
-	cp $(KERNEL) turload/build/esp/berin.bin
-	$(MAKE) -C turload run
-
-clean:
-	rm -rf $(BUILD) $(KERNEL) tools/bformat tools/bfsck tools/bls tools/bput tools/brm
-
-# ==========================================
-# Хостовые утилиты для BerFS
-# ==========================================
+kernel:
+	$(MAKE) -C $(KERNEL_DIR)
+	cp $(KERNEL_DIR)/berin.bin ./berin.bin
+	cp $(KERNEL_DIR)/berin.bin turload/build/esp/berin.bin
 
 TOOL_COMMON := tools/berfs_host.c tools/berfs_dir.c tools/berfs_alloc.c
 TOOLS       := bformat bfsck bls bput brm
@@ -71,3 +30,15 @@ tools/bput: tools/bput.c $(TOOL_COMMON)
 
 tools/brm: tools/brm.c $(TOOL_COMMON)
 	gcc -O2 -o $@ $< $(TOOL_COMMON)
+
+userland:
+	$(MAKE) -C userland/sh clean
+	$(MAKE) -C userland/sh
+
+run: kernel
+	$(MAKE) -C turload run
+
+clean:
+	$(MAKE) -C $(KERNEL_DIR) clean
+	rm -f berin.bin tools/bformat tools/bfsck tools/bls tools/bput tools/brm
+	$(MAKE) -C userland/sh clean || true
