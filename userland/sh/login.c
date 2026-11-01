@@ -24,13 +24,30 @@ static int str_eq(const char *a, const char *b) {
 
 static void read_line(char *buf, int max) {
     #ifdef __BERIN__
-    long n = read(0, buf, max - 1);
-    if (n > 0) {
-        if (buf[n - 1] == '\n') buf[n - 1] = '\0';
-        else buf[n] = '\0';
-    } else {
-        buf[0] = '\0';
+    int i = 0;
+    while (i < max - 1) {
+        char c;
+        long n = read(0, &c, 1);
+
+        if (n <= 0) continue;
+
+        if ((unsigned char)c == 0 || (unsigned char)c < 0x20) {
+            if (c == '\r' || c == '\n') {
+                if (i == 0) continue;
+                break;
+            }
+            continue;
+        }
+
+        // Backspace
+        if (c == 0x7F || c == '\b') {
+            if (i > 0) i--;
+            continue;
+        }
+
+        buf[i++] = c;
     }
+    buf[i] = '\0';
     #else
     fgets(buf, max, stdin);
     buf[strcspn(buf, "\n")] = '\0';

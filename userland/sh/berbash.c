@@ -636,18 +636,30 @@ static int builtin_logoff(int argc, char **argv) {
 }
 
 static int builtin_run(int argc, char **argv) {
-    if (argc < 2) { out_str("usage: run <path>\n", 18); return 0; }
+    if (argc < 2) { out_str("usage: run <path> [args...]\n", 28); return 0; }
     char abs_path[MAX_PATH];
     make_abs(argv[1], abs_path);
 
     #ifdef __BERIN__
-    long pid = _syscall6(200, (long)abs_path, 0, 0, 0, 0); // sys_spawn
-    if (pid < 0) {
-        out_str("[ FAIL ] run\n", 14);
-    } else {
+    long pid = _syscall6(57, 0, 0, 0, 0, 0); // fork()
+    if (pid == 0) {
+        char *exec_argv[16];
+        exec_argv[0] = abs_path;
+        int i;
+        for (i = 2; i < argc && i < 15; i++) {
+            exec_argv[i - 1] = argv[i];
+        }
+        exec_argv[i - 1] = 0;
+
+        long r = _syscall6(59, (long)abs_path, (long)exec_argv, 0, 0, 0);
+
+        out_str("[ FAIL ] execve\n", 16);
+        _exit(1);
+    } else if (pid > 0) {
         int status = 0;
-        _syscall6(61, pid, (long)&status, 0, 0, 0);
-        out_str("[ OK ] process finished\n", 24);
+        _syscall6(61, pid, (long)&status, 0, 0, 0); // wait4
+    } else {
+        out_str("[ FAIL ] fork\n", 14);
     }
     #else
     pid_t pid = fork();
