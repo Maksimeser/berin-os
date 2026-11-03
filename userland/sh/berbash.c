@@ -665,29 +665,6 @@ static int builtin_run(int argc, char **argv) {
     #ifdef __BERIN__
     long pid = _syscall6(57, 0, 0, 0, 0, 0); /* fork() */
     if (pid == 0) {
-        /* Ребёнок: собираем argv и делаем execve */
-        char *exec_argv[16];
-        exec_argv[0] = abs_path;
-        int i;
-        for (i = 2; i < argc && i < 15; i++) {
-            exec_argv[i - 1] = argv[i];
-        }
-        exec_argv[i - 1] = 0;
-
-        _syscall6(59, (long)abs_path, (long)exec_argv, 0, 0, 0); /* execve */
-
-        /* Если execve вернулся — значит упал */
-        out_str("[ FAIL ] execve\n", 17);
-        _exit(1);
-    } else if (pid > 0) {
-        /* Родитель: ждём ребёнка */
-        int status = 0;
-        _syscall6(61, pid, (long)&status, 0, 0, 0); /* wait4 */
-    } else {
-        out_str("[ FAIL ] fork\n", 15);
-    }
-    #else
-    if (pid == 0) {
         char *exec_argv[16];
         exec_argv[0] = abs_path;
         int i;
@@ -702,7 +679,23 @@ static int builtin_run(int argc, char **argv) {
 
         out_str("[ FAIL ] execve\n", 17);
         _exit(1);
+    } else if (pid > 0) {
+        int status = 0;
+        _syscall6(61, pid, (long)&status, 0, 0, 0); /* wait4 */
+    } else {
+        out_str("[ FAIL ] fork\n", 15);
     }
+    #else
+    pid_t pid = fork();
+    if (pid == 0) {
+        execvp(argv[1], &argv[1]);
+        exit(1);
+    } else if (pid > 0) {
+        waitpid(pid, NULL, 0);
+    }
+    #endif
+    return 0;
+}
 
 static struct builtin builtins[] = {
     { "help",    builtin_help    },  { "clear",   builtin_clear   },
