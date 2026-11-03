@@ -262,16 +262,33 @@ static void line_edit(void) {
     if (n == -2) { out_str("^C\n", 3); line_len = 0; return; }
     if (n <= 0)  { eof_seen = 1; line_len = 0; return; }
     if (line_buf[n - 1] == '\n') n--;
-    line_len = (int)n; line_buf[line_len] = '\0';
+    line_len = (int)n;
+    line_buf[line_len] = '\0';
     #else
     if (fgets(line_buf, MAX_LINE, stdin) == NULL) {
-        if (errno == EINTR || ctrl_c_pressed) { clearerr(stdin); ctrl_c_pressed = 0; line_len = 0; return; }
-        eof_seen = 1; line_len = 0; return;
+        if (errno == EINTR || ctrl_c_pressed) {
+            clearerr(stdin);
+            ctrl_c_pressed = 0;
+            line_len = 0;
+            return;
+        }
+        eof_seen = 1;
+        line_len = 0;
+        return;
     }
-    if (ctrl_c_pressed) { clearerr(stdin); ctrl_c_pressed = 0; line_len = 0; return; }
+    if (ctrl_c_pressed) {
+        clearerr(stdin);
+        ctrl_c_pressed = 0;
+        line_len = 0;
+        return;
+    }
     line_len = strlen(line_buf);
-    if (line_len > 0 && line_buf[line_len - 1] == '\n') line_len--;
-    else { int c; while ((c = getchar()) != '\n' && c != EOF) ; }
+    if (line_len > 0 && line_buf[line_len - 1] == '\n') {
+        line_len--;
+    } else {
+        int c;
+        while ((c = getchar()) != '\n' && c != EOF) { }
+    }
     line_buf[line_len] = '\0';
     #endif
 }
@@ -441,7 +458,9 @@ static int builtin_ls(int argc, char **argv) {
     uint32_t pos = 0, ino;
     char name[256];
     uint8_t type;
-    while (_syscall6(SYS_LISTDIR, (long)abs_path, (long)&pos, (long)name, (long)&ino, (long)&type) == 1) {
+    int safety_counter = 10000;
+
+    while (safety_counter-- > 0 && _syscall6(SYS_LISTDIR, (long)abs_path, (long)&pos, (long)name, (long)&ino, (long)&type) == 1) {
         if (!show_all && name[0] == '.') continue;
         out_char(type == 2 ? 'd' : '-');
         out_char(' ');
@@ -450,6 +469,9 @@ static int builtin_ls(int argc, char **argv) {
         out_char(' ');
         out_str(name, bb_strlen(name));
         out_char('\n');
+    }
+    if (safety_counter <= 0) {
+        out_str("[ WARN ] listdir exceeded limit (kernel vfs loop?)\n", 46);
     }
     #else
     DIR *d = opendir(abs_path);
@@ -641,7 +663,30 @@ static int builtin_run(int argc, char **argv) {
     make_abs(argv[1], abs_path);
 
     #ifdef __BERIN__
-    long pid = _syscall6(57, 0, 0, 0, 0, 0); // fork()
+    long pid = _syscall6(57, 0, 0, 0, 0, 0); /* fork() */
+    if (pid == 0) {
+        /* Ребёнок: собираем argv и делаем execve */
+        char *exec_argv[16];
+        exec_argv[0] = abs_path;
+        int i;
+        for (i = 2; i < argc && i < 15; i++) {
+            exec_argv[i - 1] = argv[i];
+        }
+        exec_argv[i - 1] = 0;
+
+        _syscall6(59, (long)abs_path, (long)exec_argv, 0, 0, 0); /* execve */
+
+        /* Если execve вернулся — значит упал */
+        out_str("[ FAIL ] execve\n", 17);
+        _exit(1);
+    } else if (pid > 0) {
+        /* Родитель: ждём ребёнка */
+        int status = 0;
+        _syscall6(61, pid, (long)&status, 0, 0, 0); /* wait4 */
+    } else {
+        out_str("[ FAIL ] fork\n", 15);
+    }
+    #else
     if (pid == 0) {
         char *exec_argv[16];
         exec_argv[0] = abs_path;
@@ -651,23 +696,13 @@ static int builtin_run(int argc, char **argv) {
         }
         exec_argv[i - 1] = 0;
 
-        long r = _syscall6(59, (long)abs_path, (long)exec_argv, 0, 0, 0);
+        out_str("[child] calling execve...\n", 26);
 
-        out_str("[ FAIL ] execve\n", 16);
+        _syscall6(59, (long)abs_path, (long)exec_argv, 0, 0, 0); /* execve */
+
+        out_str("[ FAIL ] execve\n", 17);
         _exit(1);
-    } else if (pid > 0) {
-        int status = 0;
-        _syscall6(61, pid, (long)&status, 0, 0, 0); // wait4
-    } else {
-        out_str("[ FAIL ] fork\n", 14);
     }
-    #else
-    pid_t pid = fork();
-    if (pid == 0) { execvp(argv[1], &argv[1]); exit(1); }
-    else if (pid > 0) waitpid(pid, NULL, 0);
-    #endif
-    return 0;
-}
 
 static struct builtin builtins[] = {
     { "help",    builtin_help    },  { "clear",   builtin_clear   },

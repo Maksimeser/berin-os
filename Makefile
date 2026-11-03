@@ -31,6 +31,9 @@ tools/bput: tools/bput.c $(TOOL_COMMON)
 tools/brm: tools/brm.c $(TOOL_COMMON)
 	gcc -O2 -o $@ $< $(TOOL_COMMON)
 
+tools/bmkdir: tools/bmkdir.c tools/berfs_host.c tools/berfs_dir.c tools/berfs_alloc.c
+	gcc -O2 -o tools/bmkdir tools/bmkdir.c tools/berfs_host.c tools/berfs_dir.c tools/berfs_alloc.c
+
 userland:
 	$(MAKE) -C userland/sh clean
 	$(MAKE) -C userland/sh

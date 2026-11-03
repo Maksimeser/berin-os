@@ -1,34 +1,25 @@
 #include <stdint.h>
 
-static void print(const char *str) {
-    int len = 0;
-    while (str[len]) len++;
-    __asm__ __volatile__("int $0x80" :: "a"(1), "D"(1), "S"(str), "d"(len));
-}
-
 void _start(void) {
-    long argc;
-    char **argv;
+    const char *msg = "[user] HELLO START!\n";
+    int len = 0;
+    while (msg[len]) len++;
 
+    // sys_write(1, msg, len)
     __asm__ __volatile__(
-        "mov %%rsp, %0\n\t"
-    "mov (%0), %1\n\t"
-    "add $8, %0\n\t"
-    : "=r"(argv), "=r"(argc)
+        "int $0x80"
+        :
+        : "a"(1), "D"(1), "S"(msg), "d"(len)
+        : "memory"
     );
 
-    print("[user] Hello from Ring 3!\n");
-    print("[user] argc = ");
+    // sys_exit(0)
+    __asm__ __volatile__(
+        "int $0x80"
+        :
+        : "a"(60), "D"(0)
+        : "memory"
+    );
 
-    char ac_buf[2] = { '0' + argc, '\n', };
-    __asm__ __volatile__("int $0x80" :: "a"(1), "D"(1), "S"(ac_buf), "d"(2));
-
-    if (argc > 1) {
-        print("[user] argv[1] = ");
-        print(argv[1]);
-        print("\n");
-    }
-
-    __asm__ __volatile__("int $0x80" :: "a"(60), "D"(0)); // exit(0)
     for(;;);
 }
