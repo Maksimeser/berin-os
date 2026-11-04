@@ -387,11 +387,28 @@ static int builtin_su(int argc, char **argv) {
     return 0;
 }
 
+static int builtin_kdebug(int argc, char **argv) {
+    #ifdef __BERIN__
+    if (argc < 2) {
+        long v = _syscall6(213, 0, 0, 0, 0, 0);
+        out_str(v ? "kdebug: on\n" : "kdebug: off\n", 12);
+        return 0;
+    }
+    int on = (argv[1][0] == 'o' && argv[1][1] == 'n') ? 1 : 0;
+    _syscall6(212, on, 0, 0, 0, 0);
+    out_str(on ? "[ OK ] kdebug on\n" : "[ OK ] kdebug off\n", 20);
+    #else
+    (void)argc; (void)argv;
+    #endif
+    return 0;
+}
+
 static int builtin_help(int argc, char **argv) {
     (void)argc; (void)argv;
     out_str("berbash 0.1.2 - builtins:\n", bb_strlen("berbash 0.1.2 - builtins:\n"));
     out_str("  echo, help, exit, whoami, clear, versi, uname\n", bb_strlen("  echo, help, exit, whoami, clear, versi, uname\n"));
     out_str("  lst, show, go, path, del, new, mkdir, stat, head, tail\n", bb_strlen("  lst, show, go, path, del, new, mkdir, stat, head, tail\n"));
+    out_str("  run, su, kdebug [on|off]\n", bb_strlen("  run, su, kdebug [on|off]\n"));
     return 0;
 }
 
@@ -663,27 +680,12 @@ static int builtin_run(int argc, char **argv) {
     make_abs(argv[1], abs_path);
 
     #ifdef __BERIN__
-    long pid = _syscall6(57, 0, 0, 0, 0, 0); /* fork() */
-    if (pid == 0) {
-        char *exec_argv[16];
-        exec_argv[0] = abs_path;
-        int i;
-        for (i = 2; i < argc && i < 15; i++) {
-            exec_argv[i - 1] = argv[i];
-        }
-        exec_argv[i - 1] = 0;
-
-        out_str("[child] calling execve...\n", 26);
-
-        _syscall6(59, (long)abs_path, (long)exec_argv, 0, 0, 0); /* execve */
-
-        out_str("[ FAIL ] execve\n", 17);
-        _exit(1);
-    } else if (pid > 0) {
+    long pid = _syscall6(200, (long)abs_path, 0, 0, 0, 0);  /* SYS_SPAWN, uid 0 */
+    if (pid > 0) {
         int status = 0;
-        _syscall6(61, pid, (long)&status, 0, 0, 0); /* wait4 */
+        _syscall6(61, pid, (long)&status, 0, 0, 0);         /* wait4 */
     } else {
-        out_str("[ FAIL ] fork\n", 15);
+        out_str("[ FAIL ] run\n", 14);
     }
     #else
     pid_t pid = fork();
@@ -712,6 +714,7 @@ static struct builtin builtins[] = {
     { "cd",      builtin_cd      },  { "pwd",     builtin_pwd     },
     { "rm",      builtin_rm      },  { "touch",   builtin_touch   },
     {"run",      builtin_run     },  { "su",      builtin_su      },
+    { "kdebug",  builtin_kdebug  },
     { 0, 0 },
 };
 

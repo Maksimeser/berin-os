@@ -122,7 +122,7 @@ void _start(void) {
         else if (str_eq(user, "user") && str_eq(pass, "user")) {
             write(1, "\n\033[92m[ OK ] Welcome, user!\033[0m\n", 38);
             // Передаем uid 1000 в spawn
-            long pid = _syscall6(SYS_SPAWN, (long)"/bin/berbash.elf", 1000, 0, 0, 0);
+            long pid = _syscall6(SYS_SPAWN, (long)"/berbash.elf", 1000, 0, 0, 0);
             if (pid > 0) { int st; _syscall6(61, pid, (long)&st, 0, 0, 0); }
         }
         else {

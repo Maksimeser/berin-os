@@ -1,55 +1,72 @@
-# Berin OS - Main Makefile
+# 🦊 Berin OS
 
-.PHONY: all kernel tools userland run clean
+**Своя система. Чужой софт не запрещён.**
 
-# Путь к папке с ядром (соседняя директория)
-KERNEL_DIR := ../berin_kernel
+Berin OS — это операционная система с нуля (Unix-like, но не копия Linux). 
+Этот репозиторий содержит userland, загрузчик (`turload`), хост-утилиты и скрипты сборки.
 
-all: kernel tools
+> Mascot: Sorsha, green fox.
+> Slogan: "Бери. Своя система."
 
-# Сборка ядра и копирование бинарника в Turload
-kernel:
-	$(MAKE) -C $(KERNEL_DIR)
-	cp $(KERNEL_DIR)/berin.bin turload/build/esp/berin.bin
+## Экосистема Turker Stack
 
-# ==========================================
-# Хостовые утилиты для BerFS
-# ==========================================
-TOOL_COMMON := tools/berfs_host.c tools/berfs_dir.c tools/berfs_alloc.c
-TOOLS       := bformat bfsck bls bput brm
+- **Berin OS** — своё ядро (x86_64), свой userland, свой шелл.
+- **Berony Linux** — практический дистрибутив на базе LFS 13.1 (Wayland, systemd).
+- **BGlade** — графическая среда (Corporate-Square стиль). Сначала для Berony (Linux), потом для Berin.
+- **pinit (Piper)** — Главный Домовой, PID 1 в Berin OS. 
+- **Skady** — файловый менеджер (TUI/GUI, волчица).
+- **Elara** — текстовый редактор (TUI/GUI, кошка).
 
-tools: $(addprefix tools/, $(TOOLS))
+## Технологический стек
 
-tools/bformat: tools/bformat.c $(TOOL_COMMON)
-	gcc -O2 -o $@ $< $(TOOL_COMMON)
+- **Ядро и системный софт:** C + NASM.
+- **Приложения и часть BGlade:** C# (логика, плагины, UI-тулинг).
+- **Скрипты ядра:** Bash/Make.
+- **Никакого C++:** (Ни в ядре, ни в userland).
 
-tools/bfsck: tools/bfsck.c $(TOOL_COMMON)
-	gcc -O2 -o $@ $< $(TOOL_COMMON)
+## Структура проекта
 
-tools/bls: tools/bls.c $(TOOL_COMMON)
-	gcc -O2 -o $@ $< $(TOOL_COMMON)
+```text
+berin/
+├── turload/          — UEFI bootloader (свой загрузчик)
+├── userland/sh/      — Universal berbash + libb (C)
+│   ├── berin/        — сборка под Berin OS (Ring 3)
+│   └── berony/       — сборка под Linux
+├── tools/            — Хост-утилиты: bformat, bfsck, bls, bput, brm
+├── i18n/             — Локализация (en/ru)
+├── include/          — Общие заголовки (berfs.h)
+├── docs/             — Документация (00-МАСТЕР.md)
+├── disk.img          — Образ BerFS (64 MB)
+└── Makefile
+Сборка и запуск (Arch Linux)
+Требования: nasm, gcc, make, qemu-system-x86 (+KVM), mtools.
 
-tools/bput: tools/bput.c $(TOOL_COMMON)
-	gcc -O2 -o $@ $< $(TOOL_COMMON)
+bash
+# 1. Собрать ядро (вызывает make в ~/berin_kernel)
+make kernel
 
-tools/brm: tools/brm.c $(TOOL_COMMON)
-	gcc -O2 -o $@ $< $(TOOL_COMMON)
+# 2. Собрать userland и tools
+make tools userland
 
-# ==========================================
-# Сборка юзерленда
-# ==========================================
-userland:
-	$(MAKE) -C userland/sh clean
-	$(MAKE) -C userland/sh
+# 3. Обновить образ диска (disk.img)
+make disk
 
-# ==========================================
-# Запуск в QEMU
-# ==========================================
-run: kernel
-	$(MAKE) -C turload run
+# 4. Запустить в QEMU с KVM
+make run
+Status (Phase 6.3 CLOSED)
+login.elf и berbash.elf запускаются в Ring 3 через SYS_SPAWN.
 
-# Очистка всего
-clean:
-	$(MAKE) -C $(KERNEL_DIR) clean
-	rm -f tools/bformat tools/bfsck tools/bls tools/bput tools/brm
-	$(MAKE) -C userland/sh clean || true
+Работает run /hello.elf (без паники, wait4 корректно реапит процесс).
+
+kdebug on/off включает и выключает отладочные логи ядра.
+
+fork/execve находятся в разработке (Phase 6.4).
+
+Философия
+Языки: Ядро — C + NASM. C# — только для аппов и BGlade. Rust — только для отдельных драйверов (Фаза 10+).
+
+Антимонолит: В будущем (Фаза 8+) драйверы выносятся в загружаемые модули (.bmod).
+
+UX: Пользователь всегда прав. Ошибки выдаются все сразу, понятным языком.
+
+Разработано при участии AI-ассистентов: DeepSeek, Claude, GPT.

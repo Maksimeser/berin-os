@@ -1,10 +1,9 @@
 # Berin OS - Main Makefile (Orchestrator)
-
 .PHONY: all kernel tools userland run clean
 
 KERNEL_DIR := ../berin_kernel
 
-all: kernel tools
+all: kernel tools userland
 
 kernel:
 	$(MAKE) -C $(KERNEL_DIR)
@@ -45,3 +44,11 @@ clean:
 	$(MAKE) -C $(KERNEL_DIR) clean
 	rm -f berin.bin tools/bformat tools/bfsck tools/bls tools/bput tools/brm
 	$(MAKE) -C userland/sh clean || true
+
+disk: userland
+	./tools/brm disk.img /berbash.elf 2>/dev/null || true
+	./tools/bput disk.img userland/sh/berin/berbash.elf /berbash.elf
+	./tools/brm disk.img /hello.elf 2>/dev/null || true
+	./tools/bput disk.img userland/sh/berin/hello.elf /hello.elf
+
+.PHONY: all kernel tools userland run clean disk
